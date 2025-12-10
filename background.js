@@ -1,24 +1,17 @@
 // === تنظیمات ===
-const CHECK_INTERVAL_MINUTES = 0.05; // 3 ثانیه
+const CHECK_INTERVAL = 3000;
 const HISTORY_MINUTES = 5;
 const CHANGE_THRESHOLD = 50;
+const ZABBIX_MIN_MINUTES = 5;
+const ZABBIX_MAX_MINUTES = 10;
 let isRunning = true;
 
 // === کلمات خطرناک ===
 const ALERT_PATTERNS = [
-    /\bDOWN\b/i,
-    /\bDisconnect\b/i,
-    /\bDisconnected\b/i,
-    /\bError\b/i,
-    /\bCritical\b/i,
-    /\bFailed\b/i,
-    /\bFailure\b/i,
-    /\bUnreachable\b/i,
-    /\bOffline\b/i,
-    /\bTimeout\b/i
+    /\bDOWN\b/i, /\bDisconnect\b/i, /\bDisconnected\b/i,
+    /\bError\b/i, /\bCritical\b/i, /\bFailed\b/i,
+    /\bFailure\b/i, /\bUnreachable\b/i, /\bOffline\b/i, /\bTimeout\b/i
 ];
-
-// === کلمات امن ===
 const SAFE_WORDS = ['download', 'dropdown', 'markdown', 'breakdown'];
 
 // === ذخیره وضعیت ===
@@ -29,10 +22,10 @@ let extensionStatus = {
     totalChecks: 0,
     tabs: {},
     alerts: [],
-    mutedTabs: {}  // ◄── جدید: تب‌های mute شده
+    mutedTabs: {}
 };
 
-// === بارگذاری وضعیت از storage ===
+// === بارگذاری وضعیت ===
 async function loadStatus() {
     try {
         const data = await chrome.storage.local.get('extensionStatus');
@@ -48,70 +41,79 @@ async function saveStatus() {
     await chrome.storage.local.set({ extensionStatus });
 }
 
-// === ایجاد offscreen document برای پخش صدا ===
+// === پخش صدا ===
 async function setupOffscreen() {
     try {
-        const existingContexts = await chrome.runtime.getContexts({
+        const contexts = await chrome.runtime.getContexts({
             contextTypes: ['OFFSCREEN_DOCUMENT']
         });
-        
-        if (existingContexts.length === 0) {
+        if (contexts.length === 0) {
             await chrome.offscreen.createDocument({
                 url: 'offscreen.html',
                 reasons: ['AUDIO_PLAYBACK'],
-                justification: 'پخش آلارم صوتی'
+                justification: 'پخش آلارم'
             });
         }
-    } catch (e) {
-        console.log('Offscreen setup error:', e);
-    }
+    } catch (e) {}
 }
 
-// === پخش صدا ===
 async function playAlarm() {
     try {
         await setupOffscreen();
         await chrome.runtime.sendMessage({ action: 'playSound' });
-    } catch (e) {
-        console.log('Alarm error:', e);
-    }
+    } catch (e) {}
 }
 
-// === خواندن جدول Grafana ===
-function readGrafanaTable() {
-    const result = {
-        rows: [],
-        error: null
-    };
+// === خواندن Grafana ===
+function readGrafana() {
+    const result = { type: 'grafana', rows: [], pageAlerts: [], error: null };
     
     try {
-        const rowElements = document.querySelectorAll('[role="row"]');
+        // جستجوی کل صفحه
+        const safeWords = ['download', 'dropdown', 'markdown', 'breakdown'];
+        const alertPatterns = [
+            /\bDOWN\b/gi, /\bDisconnect\b/gi, /\bDisconnected\b/gi,
+            /\bError\b/gi, /\bCritical\b/gi, /\bFailed\b/gi,
+            /\bFailure\b/gi, /\bUnreachable\b/gi, /\bOffline\b/gi, /\bTimeout\b/gi
+        ];
         
-        for (let row of rowElements) {
+        let pageText = document.body.innerText || '';
+        for (let word of safeWords) {
+            pageText = pageText.replace(new RegExp(word, 'gi'), '___');
+        }
+        
+        for (let pattern of alertPatterns) {
+            const matches = pageText.match(pattern);
+            if (matches) {
+                matches.forEach(m => {
+                    if (!result.pageAlerts.includes(m.toUpperCase())) {
+                        result.pageAlerts.push(m.toUpperCase());
+                    }
+                });
+            }
+        }
+        
+        // خواندن جدول
+        const rows = document.querySelectorAll('[role="row"]');
+        for (let row of rows) {
             const cells = row.querySelectorAll('[role="cell"]');
-            
             if (cells.length >= 2) {
                 const timeText = cells[0].innerText.trim();
                 const valueText = cells[1].innerText.trim();
-                
                 const timeMatch = timeText.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/);
                 
                 if (timeMatch) {
                     const timestamp = new Date(timeMatch[1] + 'T' + timeMatch[2]).getTime();
                     const numValue = parseFloat(valueText);
-                    
                     result.rows.push({
-                        timestamp: timestamp,
-                        timeText: timeText,
+                        timestamp, timeText,
                         value: isNaN(numValue) ? valueText : numValue,
                         isNumeric: !isNaN(numValue)
                     });
                 }
             }
         }
-        
         result.rows.sort((a, b) => a.timestamp - b.timestamp);
-        
     } catch (e) {
         result.error = e.message;
     }
@@ -119,45 +121,50 @@ function readGrafanaTable() {
     return result;
 }
 
-// === جستجوی کل صفحه برای کلمات خطرناک ===
-function scanFullPage() {
-    const result = {
-        foundWords: [],
-        error: null
-    };
+// === خواندن Zabbix ===
+function readZabbix() {
+    const result = { type: 'zabbix', problems: [], error: null };
     
     try {
-        const safeWords = ['download', 'dropdown', 'markdown', 'breakdown'];
-        const alertPatterns = [
-            /\bDOWN\b/gi,
-            /\bDisconnect\b/gi,
-            /\bDisconnected\b/gi,
-            /\bError\b/gi,
-            /\bCritical\b/gi,
-            /\bFailed\b/gi,
-            /\bFailure\b/gi,
-            /\bUnreachable\b/gi,
-            /\bOffline\b/gi,
-            /\bTimeout\b/gi
-        ];
+        const tables = document.querySelectorAll('table');
+        const seen = new Set();
         
-        let pageText = document.body.innerText || '';
-        
-        for (let word of safeWords) {
-            pageText = pageText.replace(new RegExp(word, 'gi'), '___SAFE___');
-        }
-        
-        for (let pattern of alertPatterns) {
-            const matches = pageText.match(pattern);
-            if (matches) {
-                for (let match of matches) {
-                    if (!result.foundWords.includes(match.toUpperCase())) {
-                        result.foundWords.push(match.toUpperCase());
-                    }
-                }
-            }
-        }
-        
+        tables.forEach((table) => {
+            const rows = table.querySelectorAll('tbody tr');
+            
+            rows.forEach((row) => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 7) return;
+                
+                const rowText = row.innerText.toLowerCase();
+                if (rowText.includes('resolved')) return;
+                
+                const time = cells[0]?.innerText?.trim() || '';
+                const host = cells[4]?.innerText?.trim() || '';
+                const problem = cells[5]?.innerText?.trim() || '';
+                const duration = cells[6]?.innerText?.trim() || '';
+                
+                if (!duration || !problem) return;
+                
+                const key = `${host}-${problem}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                
+                // تبدیل به دقیقه
+                let minutes = 0;
+                const h = duration.match(/(\d+)h/);
+                const m = duration.match(/(\d+)m/);
+                const s = duration.match(/(\d+)s/);
+                if (h) minutes += parseInt(h[1]) * 60;
+                if (m) minutes += parseInt(m[1]);
+                if (s) minutes += parseInt(s[1]) / 60;
+                
+                result.problems.push({
+                    time, host, problem, duration, minutes,
+                    shouldAlert: minutes >= 5 && minutes <= 10
+                });
+            });
+        });
     } catch (e) {
         result.error = e.message;
     }
@@ -165,25 +172,22 @@ function scanFullPage() {
     return result;
 }
 
-// === حذف کلمات امن ===
-function removeSafeWords(text) {
-    let cleanText = text.toLowerCase();
-    for (let word of SAFE_WORDS) {
-        cleanText = cleanText.replace(new RegExp(word, 'gi'), '___');
+// === تشخیص نوع صفحه و خواندن ===
+function detectAndRead() {
+    const url = window.location.href.toLowerCase();
+    const html = document.body.innerHTML.toLowerCase();
+    
+    if (url.includes('zabbix') || html.includes('zabbix')) {
+        return readZabbix();
+    } else if (url.includes('grafana') || html.includes('grafana')) {
+        return readGrafana();
     }
-    return cleanText;
-}
-
-// === بررسی کلمات خطرناک ===
-function checkAlertPatterns(text) {
-    const cleanText = removeSafeWords(text);
-    for (let pattern of ALERT_PATTERNS) {
-        if (pattern.test(cleanText)) {
-            const match = cleanText.match(pattern);
-            return match ? match[0].toUpperCase() : 'ALERT';
-        }
-    }
-    return null;
+    
+    // تلاش برای هر دو
+    const zabbix = readZabbix();
+    if (zabbix.problems.length > 0) return zabbix;
+    
+    return readGrafana();
 }
 
 // === محاسبه میانگین ===
@@ -192,180 +196,123 @@ function calculateAverage(arr) {
     return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
+// === پردازش نتایج ===
+async function processResults(data, tab) {
+    const now = Date.now();
+    const tabId = tab.id;
+    const isMuted = extensionStatus.mutedTabs[tabId] === true;
+    
+    extensionStatus.tabs[tabId] = {
+        title: tab.title,
+        url: tab.url,
+        type: data.type,
+        lastCheck: now,
+        status: 'OK',
+        isMuted,
+        details: {}
+    };
+    
+    let shouldAlarm = false;
+    let alertReasons = [];
+    
+    // === پردازش Zabbix ===
+    if (data.type === 'zabbix') {
+        const alertProblems = data.problems.filter(p => p.shouldAlert);
+        extensionStatus.tabs[tabId].details = {
+            totalProblems: data.problems.length,
+            alertProblems: alertProblems.length,
+            problems: data.problems
+        };
+        
+        if (alertProblems.length > 0 && !isMuted) {
+            extensionStatus.tabs[tabId].status = 'ALERT';
+            shouldAlarm = true;
+            alertReasons.push(`Zabbix: ${alertProblems.length} مشکل (۵-۱۰ دقیقه)`);
+        }
+    }
+    
+    // === پردازش Grafana ===
+    if (data.type === 'grafana') {
+        const fiveMinutesAgo = now - (HISTORY_MINUTES * 60 * 1000);
+        const recentRows = data.rows.filter(r => r.timestamp >= fiveMinutesAgo);
+        
+        extensionStatus.tabs[tabId].details = {
+            totalRows: data.rows.length,
+            recentRows: recentRows.length,
+            pageAlerts: data.pageAlerts
+        };
+        
+        // کلمات خطرناک در صفحه
+        if (data.pageAlerts.length > 0 && !isMuted) {
+            extensionStatus.tabs[tabId].status = 'ALERT';
+            shouldAlarm = true;
+            alertReasons.push(`صفحه: ${data.pageAlerts.join(', ')}`);
+        }
+        
+        if (recentRows.length > 0) {
+            const latest = recentRows[recentRows.length - 1];
+            extensionStatus.tabs[tabId].details.lastValue = latest.value;
+            extensionStatus.tabs[tabId].details.lastTime = latest.timeText;
+            
+            // مقدار صفر
+            if (latest.isNumeric && latest.value === 0 && !isMuted) {
+                extensionStatus.tabs[tabId].status = 'ALERT';
+                shouldAlarm = true;
+                alertReasons.push('مقدار = ۰');
+            }
+            
+            // کاهش ۵۰٪
+            if (latest.isNumeric && recentRows.length >= 3) {
+                const prevNums = recentRows.slice(0, -1).filter(r => r.isNumeric).map(r => r.value);
+                if (prevNums.length >= 2) {
+                    const avg = calculateAverage(prevNums);
+                    extensionStatus.tabs[tabId].details.average = avg;
+                    
+                    if (avg > 0) {
+                        const change = ((avg - latest.value) / avg) * 100;
+                        if (change >= CHANGE_THRESHOLD && !isMuted) {
+                            extensionStatus.tabs[tabId].status = 'ALERT';
+                            shouldAlarm = true;
+                            alertReasons.push(`کاهش ${change.toFixed(1)}%`);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // ثبت آلارم
+    if (shouldAlarm) {
+        extensionStatus.alerts.unshift({
+            time: now,
+            tabId,
+            tabTitle: tab.title,
+            type: data.type,
+            detail: alertReasons.join(' + ')
+        });
+        if (extensionStatus.alerts.length > 50) {
+            extensionStatus.alerts = extensionStatus.alerts.slice(0, 50);
+        }
+        await playAlarm();
+    }
+}
+
 // === بررسی یک تب ===
 async function checkTab(tab) {
     if (!tab.url) return;
     if (tab.url.startsWith('chrome://')) return;
     if (tab.url.startsWith('chrome-extension://')) return;
     
-    // بررسی mute
-    const isMuted = extensionStatus.mutedTabs[tab.id] === true;
-    
     try {
-        const tableResults = await chrome.scripting.executeScript({
+        const results = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: readGrafanaTable
+            func: detectAndRead
         });
         
-        const pageResults = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: scanFullPage
-        });
-        
-        const now = Date.now();
-        
-        extensionStatus.tabs[tab.id] = {
-            title: tab.title,
-            url: tab.url,
-            lastCheck: now,
-            status: 'OK',
-            totalRows: 0,
-            recentRows: 0,
-            lastValue: null,
-            lastTime: null,
-            average: null,
-            averageCount: 0,
-            alertWord: null,
-            pageAlertWords: [],
-            suddenChange: null,
-            zeroValue: false,
-            isMuted: isMuted  // ◄── جدید
-        };
-        
-        let shouldAlarm = false;
-        let alertReasons = [];
-        
-        // === Check 1: کلمات خطرناک در کل صفحه ===
-        if (pageResults && pageResults[0] && pageResults[0].result) {
-            const pageData = pageResults[0].result;
-            if (pageData.foundWords && pageData.foundWords.length > 0) {
-                extensionStatus.tabs[tab.id].status = 'ALERT';
-                extensionStatus.tabs[tab.id].pageAlertWords = pageData.foundWords;
-                if (!isMuted) {
-                    shouldAlarm = true;
-                    alertReasons.push(`صفحه: ${pageData.foundWords.join(', ')}`);
-                }
-            }
+        if (results && results[0] && results[0].result) {
+            await processResults(results[0].result, tab);
         }
-        
-        if (!tableResults || !tableResults[0] || !tableResults[0].result) {
-            if (shouldAlarm && !isMuted) {
-                extensionStatus.alerts.unshift({
-                    time: now,
-                    tabTitle: tab.title,
-                    tabId: tab.id,
-                    detail: alertReasons.join(' + ')
-                });
-                if (extensionStatus.alerts.length > 50) {
-                    extensionStatus.alerts = extensionStatus.alerts.slice(0, 50);
-                }
-                await playAlarm();
-            }
-            return;
-        }
-        
-        const data = tableResults[0].result;
-        const fiveMinutesAgo = now - (HISTORY_MINUTES * 60 * 1000);
-        const recentRows = data.rows.filter(row => row.timestamp >= fiveMinutesAgo);
-        
-        extensionStatus.tabs[tab.id].totalRows = data.rows.length;
-        extensionStatus.tabs[tab.id].recentRows = recentRows.length;
-        
-        if (recentRows.length === 0) {
-            if (shouldAlarm && !isMuted) {
-                extensionStatus.alerts.unshift({
-                    time: now,
-                    tabTitle: tab.title,
-                    tabId: tab.id,
-                    detail: alertReasons.join(' + ')
-                });
-                if (extensionStatus.alerts.length > 50) {
-                    extensionStatus.alerts = extensionStatus.alerts.slice(0, 50);
-                }
-                await playAlarm();
-            }
-            return;
-        }
-        
-        const latestRow = recentRows[recentRows.length - 1];
-        extensionStatus.tabs[tab.id].lastValue = latestRow.value;
-        extensionStatus.tabs[tab.id].lastTime = latestRow.timeText;
-        
-        // === Check 2: کلمات خطرناک در جدول ===
-        if (!latestRow.isNumeric) {
-            const foundWord = checkAlertPatterns(String(latestRow.value));
-            if (foundWord) {
-                extensionStatus.tabs[tab.id].status = 'ALERT';
-                extensionStatus.tabs[tab.id].alertWord = foundWord;
-                if (!isMuted) {
-                    shouldAlarm = true;
-                    alertReasons.push(`جدول: "${foundWord}"`);
-                }
-            }
-        }
-        
-        // === Check 3: مقدار صفر ===
-        if (latestRow.isNumeric && latestRow.value === 0) {
-            extensionStatus.tabs[tab.id].status = 'ALERT';
-            extensionStatus.tabs[tab.id].zeroValue = true;
-            if (!isMuted) {
-                shouldAlarm = true;
-                alertReasons.push('مقدار = ۰');
-            }
-        }
-        
-        // === Check 4: کاهش بیش از ۵۰٪ ===
-        if (latestRow.isNumeric && recentRows.length >= 3) {
-            const previousNumeric = recentRows
-                .slice(0, -1)
-                .filter(r => r.isNumeric)
-                .map(r => r.value);
-            
-            if (previousNumeric.length >= 2) {
-                const average = calculateAverage(previousNumeric);
-                
-                extensionStatus.tabs[tab.id].average = average;
-                extensionStatus.tabs[tab.id].averageCount = previousNumeric.length;
-                
-                if (average > 0) {
-                    const changePercent = ((average - latestRow.value) / average) * 100;
-                    
-                    if (changePercent >= CHANGE_THRESHOLD) {
-                        extensionStatus.tabs[tab.id].status = 'ALERT';
-                        extensionStatus.tabs[tab.id].suddenChange = {
-                            average: average,
-                            current: latestRow.value,
-                            change: changePercent,
-                            direction: 'کاهش'
-                        };
-                        if (!isMuted) {
-                            shouldAlarm = true;
-                            alertReasons.push(`کاهش ${changePercent.toFixed(1)}%`);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // === ثبت آلارم ===
-        if (shouldAlarm && !isMuted) {
-            extensionStatus.alerts.unshift({
-                time: now,
-                tabTitle: tab.title,
-                tabId: tab.id,
-                detail: alertReasons.join(' + ')
-            });
-            
-            if (extensionStatus.alerts.length > 50) {
-                extensionStatus.alerts = extensionStatus.alerts.slice(0, 50);
-            }
-            
-            await playAlarm();
-        }
-        
-    } catch (e) {
-        console.log('Check tab error:', e);
-    }
+    } catch (e) {}
 }
 
 // === بررسی همه تب‌ها ===
@@ -382,12 +329,10 @@ async function checkAllTabs() {
             await checkTab(tab);
         }
         await saveStatus();
-    } catch (e) {
-        console.log('Check all tabs error:', e);
-    }
+    } catch (e) {}
 }
 
-// === ریست کامل ===
+// === ریست ===
 function resetAll() {
     extensionStatus = {
         isRunning: true,
@@ -400,61 +345,45 @@ function resetAll() {
     };
     isRunning = true;
     saveStatus();
-    checkAllTabs();
 }
 
-// === دریافت پیام ===
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'toggle') {
+// === پیام‌ها ===
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'toggle') {
         isRunning = !isRunning;
         extensionStatus.isRunning = isRunning;
         saveStatus();
         sendResponse({ isRunning });
-    } else if (message.action === 'clearAlerts') {
+    } else if (msg.action === 'reset') {
+        resetAll();
+        sendResponse({ success: true });
+    } else if (msg.action === 'clearAlerts') {
         extensionStatus.alerts = [];
         saveStatus();
         sendResponse({ success: true });
-    } else if (message.action === 'reset') {
-        resetAll();
-        sendResponse({ success: true });
-    } else if (message.action === 'toggleMute') {
-        const tabId = message.tabId;
-        extensionStatus.mutedTabs[tabId] = !extensionStatus.mutedTabs[tabId];
-        if (extensionStatus.tabs[tabId]) {
-            extensionStatus.tabs[tabId].isMuted = extensionStatus.mutedTabs[tabId];
-        }
+    } else if (msg.action === 'toggleMute') {
+        extensionStatus.mutedTabs[msg.tabId] = !extensionStatus.mutedTabs[msg.tabId];
         saveStatus();
-        sendResponse({ isMuted: extensionStatus.mutedTabs[tabId] });
-    } else if (message.action === 'getStatus') {
-        sendResponse({ extensionStatus });
-    } else if (message.action === 'openDashboard') {
+        sendResponse({ isMuted: extensionStatus.mutedTabs[msg.tabId] });
+    } else if (msg.action === 'openDashboard') {
         chrome.tabs.create({ url: 'dashboard.html' });
         sendResponse({ success: true });
     }
     return true;
 });
 
-// === استفاده از chrome.alarms ===
-chrome.alarms.create('checkTabs', { 
-    delayInMinutes: CHECK_INTERVAL_MINUTES,
-    periodInMinutes: CHECK_INTERVAL_MINUTES
-});
-
+// === Alarm ===
+chrome.alarms.create('check', { periodInMinutes: 0.05 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'checkTabs') {
-        checkAllTabs();
-    }
+    if (alarm.name === 'check') checkAllTabs();
 });
 
 // === Keep-alive ===
-const keepAlive = () => {
-    chrome.runtime.getPlatformInfo(() => {});
-};
-setInterval(keepAlive, 20000);
+setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
 
 // === شروع ===
-console.log('🚀 Monitoring Alert v2.0 شروع شد!');
+console.log('🚀 Monitoring Alert v2.0');
 loadStatus().then(() => {
     setupOffscreen();
     checkAllTabs();
-});
+});        
