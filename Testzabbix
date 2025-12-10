@@ -1,9 +1,44 @@
-// پیدا کردن ستون درست
-const table = document.querySelectorAll('table')[1];
-const row = table.querySelector('tbody tr');
-const cells = row.querySelectorAll('td');
+// تست نهایی Zabbix 5.0
+const tables = document.querySelectorAll('table');
+let found = 0;
 
-for (let i = 0; i < cells.length; i++) {
-    const text = cells[i].innerText.trim().substring(0, 40);
-    if (text) console.log(`${i}: ${text}`);
-}
+tables.forEach((table) => {
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach((row) => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 7) return;
+        
+        const time = cells[0]?.innerText?.trim() || '';
+        const host = cells[4]?.innerText?.trim() || '';
+        const problem = cells[5]?.innerText?.trim() || '';
+        const duration = cells[6]?.innerText?.trim() || '';
+        
+        if (!duration || !problem) return;
+        
+        // تبدیل Duration به دقیقه
+        let minutes = 0;
+        const h = duration.match(/(\d+)h/);
+        const m = duration.match(/(\d+)m/);
+        const s = duration.match(/(\d+)s/);
+        
+        if (h) minutes += parseInt(h[1]) * 60;
+        if (m) minutes += parseInt(m[1]);
+        if (s) minutes += parseInt(s[1]) / 60;
+        
+        // وضعیت آلارم
+        let status = '❌ بدون آلارم';
+        if (minutes >= 5 && minutes <= 10) {
+            status = '🚨 آلارم!';
+        }
+        
+        found++;
+        console.log(`Host: ${host}`);
+        console.log(`Problem: ${problem}`);
+        console.log(`Duration: ${duration} (${minutes.toFixed(1)} دقیقه)`);
+        console.log(`Status: ${status}`);
+        console.log('---');
+    });
+});
+
+console.log(`\n✅ تعداد: ${found}`);
