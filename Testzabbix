@@ -1,22 +1,9 @@
-// تست Zabbix 5.0
+// پیدا کردن ستون درست
 const table = document.querySelectorAll('table')[1];
-const rows = table.querySelectorAll('tbody tr');
+const row = table.querySelector('tbody tr');
+const cells = row.querySelectorAll('td');
 
-console.log('=== Zabbix 5.0 Problems ===\n');
-
-rows.forEach((row, i) => {
-    if (i >= 3) return; // فقط 3 ردیف اول
-    
-    const cells = row.querySelectorAll('td');
-    
-    const time = cells[1]?.innerText?.trim() || '';
-    const host = cells[3]?.innerText?.trim() || '';
-    const problem = cells[4]?.innerText?.trim() || '';
-    const duration = cells[5]?.innerText?.trim() || '';
-    
-    console.log(`Time: ${time}`);
-    console.log(`Host: ${host}`);
-    console.log(`Problem: ${problem}`);
-    console.log(`Duration: ${duration}`);
-    console.log('---');
-});
+for (let i = 0; i < cells.length; i++) {
+    const text = cells[i].innerText.trim().substring(0, 40);
+    if (text) console.log(`${i}: ${text}`);
+}
