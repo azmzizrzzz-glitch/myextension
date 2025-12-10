@@ -1,5 +1,6 @@
-// تست نهایی Zabbix 5.0
+// بدون تکرار
 const tables = document.querySelectorAll('table');
+const seen = new Set();
 let found = 0;
 
 tables.forEach((table) => {
@@ -9,24 +10,30 @@ tables.forEach((table) => {
         const cells = row.querySelectorAll('td');
         if (cells.length < 7) return;
         
-        const time = cells[0]?.innerText?.trim() || '';
+        const rowText = row.innerText.toLowerCase();
+        if (rowText.includes('resolved')) return;
+        
         const host = cells[4]?.innerText?.trim() || '';
         const problem = cells[5]?.innerText?.trim() || '';
         const duration = cells[6]?.innerText?.trim() || '';
         
         if (!duration || !problem) return;
         
-        // تبدیل Duration به دقیقه
+        // حذف تکراری
+        const key = `${host}-${problem}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        
+        // تبدیل به دقیقه
         let minutes = 0;
         const h = duration.match(/(\d+)h/);
         const m = duration.match(/(\d+)m/);
         const s = duration.match(/(\d+)s/);
-        
         if (h) minutes += parseInt(h[1]) * 60;
         if (m) minutes += parseInt(m[1]);
         if (s) minutes += parseInt(s[1]) / 60;
         
-        // وضعیت آلارم
+        // آلارم 5-10 دقیقه
         let status = '❌ بدون آلارم';
         if (minutes >= 5 && minutes <= 10) {
             status = '🚨 آلارم!';
@@ -41,4 +48,4 @@ tables.forEach((table) => {
     });
 });
 
-console.log(`\n✅ تعداد: ${found}`);
+console.log(`\n✅ Problems: ${found}`);
