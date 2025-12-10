@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Monitoring Alert",
-  "version": "1.0",
+  "version": "2.0",
   "description": "آلارم صوتی برای مانیتورینگ",
   "permissions": [
     "tabs",
     "scripting",
-    "storage"
+    "storage",
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"
