@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitoring Alert - داشبورد</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Tahoma, Arial, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #333;
+        }
+        
+        h1 {
+            color: #00ff88;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .status-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .card-label {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        
+        .card-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .card-value.running {
+            color: #00ff88;
+        }
+        
+        .card-value.stopped {
+            color: #ff4444;
+        }
+        
+        .card-value.number {
+            color: #4dabf7;
+        }
+        
+        h2 {
+            color: #4dabf7;
+            font-size: 16px;
+            margin: 25px 0 15px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            border: none;
+            transition: all 0.3s;
+        }
+        
+        .btn-toggle {
+            background: #00ff88;
+            color: #000;
+        }
+        
+        .btn-toggle.stopped {
+            background: #ff4444;
+            color: #fff;
+        }
+        
+        .btn-reset {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            color: #fff;
+        }
+        
+        .btn-reset:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
+        }
+        
+        .btn-clear {
+            background: #666;
+            color: #fff;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+        
+        /* === تب‌ها === */
+        .tab-item {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            border-right: 5px solid #00ff88;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        
+        .tab-item.alert {
+            border-right-color: #ff4444;
+            background: linear-gradient(135deg, #2a1a1a, #1a1a2e);
+        }
+        
+        .tab-item.muted {
+            opacity: 0.5;
+            border-right-color: #666;
+        }
+        
+        .tab-info {
+            flex: 1;
+        }
+        
+        .tab-title {
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .tab-details {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 3px;
+        }
+        
+        .tab-numbers {
+            font-size: 11px;
+            color: #4dabf7;
+            margin-top: 5px;
+        }
+        
+        .tab-alert-info {
+            font-size: 11px;
+            color: #ff4444;
+            margin-top: 5px;
+            background: rgba(255, 68, 68, 0.1);
+            padding: 5px 8px;
+            border-radius: 5px;
+        }
+        
+        /* === دکمه Mute === */
+        .mute-toggle {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .mute-btn {
+            width: 60px;
+            height: 30px;
+            border-radius: 15px;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s;
+        }
+        
+        .mute-btn.active {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+        }
+        
+        .mute-btn.muted {
+            background: linear-gradient(135deg, #666, #444);
+        }
+        
+        .mute-btn::after {
+            content: '';
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border-radius: 50%;
+            top: 3px;
+            transition: all 0.3s;
+        }
+        
+        .mute-btn.active::after {
+            right: 3px;
+        }
+        
+        .mute-btn.muted::after {
+            right: 33px;
+        }
+        
+        .mute-label {
+            font-size: 10px;
+            color: #888;
+        }
+        
+        .mute-label.active {
+            color: #00ff88;
+        }
+        
+        .mute-label.muted {
+            color: #ff4444;
+        }
+        
+        /* === آلارم‌ها === */
+        .alert-item {
+            background: #2a1a1a;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-right: 4px solid #ff4444;
+        }
+        
+        .alert-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .alert-detail {
+            font-size: 12px;
+            color: #ff8888;
+        }
+        
+        .alert-time {
+            font-size: 10px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 30px;
+            color: #888;
+        }
+        
+        .no-data.success {
+            color: #00ff88;
+        }
+        
+        /* === انیمیشن === */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .alert-badge {
+            display: inline-block;
+            background: #ff4444;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔊 Monitoring Alert</h1>
+            <div class="header-buttons">
+                <button class="btn btn-toggle" id="toggleBtn">⏸️ متوقف کردن</button>
+                <button class="btn btn-reset" id="resetBtn">🔄 ریست کامل</button>
+            </div>
+        </header>
+        
+        <div class="status-cards">
+            <div class="card">
+                <div class="card-label">وضعیت</div>
+                <div class="card-value" id="statusText">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">زمان شروع</div>
+                <div class="card-value number" id="startTime">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">آخرین بررسی</div>
+                <div class="card-value number" id="lastCheck">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">تعداد بررسی</div>
+                <div class="card-value number" id="totalChecks">0</div>
+            </div>
+        </div>
+        
+        <h2>📑 تب‌های تحت نظارت</h2>
+        <div id="tabsList">
+            <div class="no-data">در حال بارگذاری...</div>
+        </div>
+        
+        <h2>
+            🚨 آلارم‌های اخیر
+            <button class="btn btn-clear" id="clearBtn">🗑️ پاک کردن</button>
+        </h2>
+        <div id="alertsList">
+            <div class="no-data success">✅ بدون آلارم</div>
+        </div>
+    </div>
+    
+    <script src="dashboard.js"></script>
+</body>
+</html>
