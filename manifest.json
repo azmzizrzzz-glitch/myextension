@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Monitoring Alert",
   "version": "2.0",
-  "description": "آلارم صوتی برای مانیتورینگ",
+  "description": "آلارم برای Grafana و Zabbix",
   "permissions": [
     "tabs",
     "scripting",
