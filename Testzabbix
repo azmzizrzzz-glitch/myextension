@@ -1,0 +1,51 @@
+// تست خواندن جدول Problems زبیکس
+console.log('=== 🔍 تست خواندن Zabbix Problems ===\n');
+
+const tables = document.querySelectorAll('table');
+let problemsFound = 0;
+
+tables.forEach((table) => {
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach((row) => {
+        const cells = row.querySelectorAll('td');
+        
+        if (cells.length >= 7) {
+            const host = cells[4]?.innerText?.trim() || '';
+            const problem = cells[5]?.innerText?.trim() || '';
+            const duration = cells[6]?.innerText?.trim() || '';
+            
+            if (problem && duration) {
+                problemsFound++;
+                
+                // تبدیل Duration به دقیقه
+                let totalMinutes = 0;
+                const hours = duration.match(/(\d+)h/);
+                const minutes = duration.match(/(\d+)m/);
+                const seconds = duration.match(/(\d+)s/);
+                
+                if (hours) totalMinutes += parseInt(hours[1]) * 60;
+                if (minutes) totalMinutes += parseInt(minutes[1]);
+                if (seconds) totalMinutes += parseInt(seconds[1]) / 60;
+                
+                // بررسی شرط 5-10 دقیقه
+                let status = '';
+                if (totalMinutes < 5) {
+                    status = '⏳ کمتر از 5 دقیقه (بدون آلارم)';
+                } else if (totalMinutes <= 10) {
+                    status = '🚨 بین 5-10 دقیقه (آلارم!)';
+                } else {
+                    status = '⏰ بیشتر از 10 دقیقه (بدون آلارم)';
+                }
+                
+                console.log(`Host: ${host}`);
+                console.log(`Problem: ${problem}`);
+                console.log(`Duration: ${duration} (${totalMinutes.toFixed(1)} دقیقه)`);
+                console.log(`Status: ${status}`);
+                console.log('---');
+            }
+        }
+    });
+});
+
+console.log(`\n✅ تعداد Problems پیدا شده: ${problemsFound}`);
