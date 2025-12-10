@@ -10,145 +10,72 @@
         }
         
         body {
-            width: 450px;
-            max-height: 500px;
-            overflow-y: auto;
+            width: 300px;
             font-family: Tahoma, Arial, sans-serif;
             background: #0a0a1a;
             color: #eee;
-            padding: 15px;
+            padding: 20px;
+            text-align: center;
         }
         
         h1 {
             color: #00ff88;
             font-size: 18px;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            margin-bottom: 20px;
         }
         
-        .status-box {
+        .status {
             background: #1a1a2e;
             border-radius: 10px;
-            padding: 12px;
+            padding: 15px;
             margin-bottom: 15px;
         }
         
-        .status-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
+        .status.running {
+            border: 2px solid #00ff88;
         }
         
-        .status-row:last-child {
-            margin-bottom: 0;
+        .status.stopped {
+            border: 2px solid #ff4444;
         }
         
-        .label {
-            color: #888;
-        }
-        
-        .value {
+        .status-text {
+            font-size: 16px;
             font-weight: bold;
         }
         
-        .running {
+        .status-text.running {
             color: #00ff88;
         }
         
-        .stopped {
+        .status-text.stopped {
             color: #ff4444;
-        }
-        
-        .paused {
-            color: #ffaa00;
-        }
-        
-        h2 {
-            color: #4dabf7;
-            font-size: 14px;
-            margin: 15px 0 10px 0;
-            border-bottom: 1px solid #333;
-            padding-bottom: 5px;
-        }
-        
-        .tab-item {
-            background: #16213e;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 8px;
-            border-right: 4px solid #00ff88;
-        }
-        
-        .tab-item.alert {
-            border-right-color: #ff4444;
-            background: #2a1a1a;
-        }
-        
-        .tab-title {
-            font-size: 13px;
-            margin-bottom: 5px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .tab-details {
-            font-size: 11px;
-            color: #888;
-        }
-        
-        .tab-numbers {
-            font-size: 11px;
-            color: #4dabf7;
-            margin-top: 3px;
-        }
-        
-        .tab-alert-info {
-            font-size: 11px;
-            color: #ff4444;
-            margin-top: 3px;
-        }
-        
-        .alert-item {
-            background: #2a1a1a;
-            border-radius: 6px;
-            padding: 8px;
-            margin-bottom: 6px;
-            font-size: 11px;
-            border-right: 3px solid #ff4444;
-        }
-        
-        .alert-time {
-            color: #888;
-            font-size: 10px;
-        }
-        
-        .no-alerts {
-            color: #00ff88;
-            text-align: center;
-            padding: 20px;
-        }
-        
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
         }
         
         .btn {
-            flex: 1;
-            padding: 10px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-family: inherit;
-            font-size: 13px;
+            width: 100%;
+            padding: 12px;
+            margin: 5px 0;
             border: none;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-dashboard {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+        }
+        
+        .btn-dashboard:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.5);
         }
         
         .btn-toggle {
-            background: #00ff88;
+            background: #4dabf7;
             color: #000;
         }
         
@@ -157,67 +84,32 @@
             color: #fff;
         }
         
-        .btn-toggle:hover {
-            opacity: 0.9;
-        }
-        
-        .btn-refresh {
-            background: #4dabf7;
-            color: #000;
-        }
-        
-        .btn-refresh:hover {
-            background: #74c0fc;
-        }
-        
-        .btn-clear {
-            background: #666;
-            color: #fff;
-        }
-        
-        .btn-clear:hover {
-            background: #888;
+        .info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 15px;
         }
     </style>
 </head>
 <body>
     <h1>🔊 Monitoring Alert</h1>
     
-    <div class="status-box">
-        <div class="status-row">
-            <span class="label">وضعیت:</span>
-            <span class="value" id="statusText">در حال بررسی...</span>
-        </div>
-        <div class="status-row">
-            <span class="label">زمان شروع:</span>
-            <span class="value" id="startTime">-</span>
-        </div>
-        <div class="status-row">
-            <span class="label">آخرین بررسی:</span>
-            <span class="value" id="lastCheck">-</span>
-        </div>
-        <div class="status-row">
-            <span class="label">تعداد بررسی:</span>
-            <span class="value" id="totalChecks">0</span>
-        </div>
+    <div class="status" id="statusBox">
+        <div class="status-text" id="statusText">در حال بررسی...</div>
     </div>
     
-    <div class="btn-group">
-        <button class="btn btn-toggle" id="toggleBtn">⏸️ متوقف کردن</button>
-        <button class="btn btn-refresh" id="refreshBtn">🔄 بروزرسانی</button>
-    </div>
+    <button class="btn btn-dashboard" id="dashboardBtn">
+        📊 باز کردن داشبورد کامل
+    </button>
     
-    <h2>📑 تب‌های تحت نظارت</h2>
-    <div id="tabsList">
-        <div class="no-alerts">در حال بارگذاری...</div>
-    </div>
+    <button class="btn btn-toggle" id="toggleBtn">
+        ⏸️ متوقف کردن
+    </button>
     
-    <h2>🚨 آلارم‌های اخیر</h2>
-    <div id="alertsList">
-        <div class="no-alerts">بدون آلارم</div>
+    <div class="info">
+        برای مشاهده جزئیات و تنظیمات،<br>
+        داشبورد کامل را باز کنید
     </div>
-    
-    <button class="btn btn-clear" id="clearBtn">🗑️ پاک کردن آلارم‌ها</button>
     
     <script src="popup.js"></script>
 </body>
