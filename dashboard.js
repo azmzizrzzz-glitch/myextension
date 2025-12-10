@@ -1,168 +1,131 @@
-function formatTime(timestamp) {
-    if (!timestamp) return '-';
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('fa-IR');
-}
+const formatTime = (t) => t ? new Date(t).toLocaleTimeString('fa-IR') : '-';
+const timeAgo = (t) => {
+    if (!t) return '-';
+    const s = Math.floor((Date.now() - t) / 1000);
+    if (s < 60) return `${s} ثانیه پیش`;
+    if (s < 3600) return `${Math.floor(s / 60)} دقیقه پیش`;
+    return `${Math.floor(s / 3600)} ساعت پیش`;
+};
 
-function timeAgo(timestamp) {
-    if (!timestamp) return '-';
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+async function update() {
+    const data = await chrome.storage.local.get('extensionStatus');
+    const s = data.extensionStatus;
     
-    if (seconds < 60) return `${seconds} ثانیه پیش`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} دقیقه پیش`;
-    return `${Math.floor(seconds / 3600)} ساعت پیش`;
-}
-
-async function updateDashboard() {
-    try {
-        const data = await chrome.storage.local.get('extensionStatus');
-        const status = data.extensionStatus;
-        
-        if (!status) {
-            document.getElementById('statusText').textContent = '❌ اجرا نشده';
-            document.getElementById('statusText').className = 'card-value stopped';
-            return;
-        }
-        
-        // === وضعیت ===
-        const toggleBtn = document.getElementById('toggleBtn');
-        if (status.isRunning) {
-            document.getElementById('statusText').textContent = '✅ فعال';
-            document.getElementById('statusText').className = 'card-value running';
-            toggleBtn.textContent = '⏸️ متوقف کردن';
-            toggleBtn.className = 'btn btn-toggle';
-        } else {
-            document.getElementById('statusText').textContent = '⏸️ متوقف';
-            document.getElementById('statusText').className = 'card-value stopped';
-            toggleBtn.textContent = '▶️ شروع مجدد';
-            toggleBtn.className = 'btn btn-toggle stopped';
-        }
-        
-        document.getElementById('startTime').textContent = formatTime(status.startTime);
-        document.getElementById('lastCheck').textContent = timeAgo(status.lastCheck);
-        document.getElementById('totalChecks').textContent = status.totalChecks;
-        
-        // === تب‌ها ===
-        const tabsList = document.getElementById('tabsList');
-        const tabs = Object.entries(status.tabs || {});
-        
-        if (tabs.length === 0) {
-            tabsList.innerHTML = '<div class="no-data">هنوز تبی بررسی نشده</div>';
-        } else {
-            tabsList.innerHTML = tabs.map(([tabId, tab]) => {
-                const isMuted = status.mutedTabs && status.mutedTabs[tabId];
-                const isAlert = tab.status === 'ALERT';
-                
-                return `
-                <div class="tab-item ${isAlert ? 'alert' : ''} ${isMuted ? 'muted' : ''}">
+    if (!s) {
+        document.getElementById('statusText').textContent = '❌ غیرفعال';
+        return;
+    }
+    
+    const toggleBtn = document.getElementById('toggleBtn');
+    if (s.isRunning) {
+        document.getElementById('statusText').textContent = '✅ فعال';
+        document.getElementById('statusText').className = 'card-value running';
+        toggleBtn.textContent = '⏸️ متوقف';
+        toggleBtn.className = 'btn btn-toggle';
+    } else {
+        document.getElementById('statusText').textContent = '⏸️ متوقف';
+        document.getElementById('statusText').className = 'card-value stopped';
+        toggleBtn.textContent = '▶️ شروع';
+        toggleBtn.className = 'btn btn-toggle stopped';
+    }
+    
+    document.getElementById('startTime').textContent = formatTime(s.startTime);
+    document.getElementById('lastCheck').textContent = timeAgo(s.lastCheck);
+    document.getElementById('totalChecks').textContent = s.totalChecks;
+    
+    // تب‌ها
+    const tabs = Object.entries(s.tabs || {});
+    const tabsList = document.getElementById('tabsList');
+    
+    if (tabs.length === 0) {
+        tabsList.innerHTML = '<div class="no-data">هنوز تبی نیست</div>';
+    } else {
+        tabsList.innerHTML = tabs.map(([id, t]) => {
+            const muted = s.mutedTabs && s.mutedTabs[id];
+            const alert = t.status === 'ALERT';
+            const typeClass = t.type === 'zabbix' ? 'type-zabbix' : 'type-grafana';
+            const typeName = t.type === 'zabbix' ? 'Zabbix' : 'Grafana';
+            
+            let details = '';
+            if (t.type === 'zabbix' && t.details) {
+                details = `<div class="tab-details">Problems: ${t.details.totalProblems || 0} (هشدار: ${t.details.alertProblems || 0})</div>`;
+                if (t.details.problems) {
+                    t.details.problems.forEach(p => {
+                        if (p.shouldAlert) {
+                            details += `<div class="tab-alert">🚨 ${p.host}: ${p.problem} (${p.duration})</div>`;
+                        }
+                    });
+                }
+            } else if (t.type === 'grafana' && t.details) {
+                details = `<div class="tab-details">سطرها: ${t.details.recentRows || 0}</div>`;
+                if (t.details.lastValue !== undefined) {
+                    details += `<div class="tab-details">آخرین: ${t.details.lastValue}</div>`;
+                }
+                if (t.details.pageAlerts && t.details.pageAlerts.length > 0) {
+                    details += `<div class="tab-alert">⚠️ ${t.details.pageAlerts.join(', ')}</div>`;
+                }
+            }
+            
+            return `
+                <div class="tab-item ${alert ? 'alert' : ''} ${muted ? 'muted' : ''}">
                     <div class="tab-info">
                         <div class="tab-title">
-                            ${isAlert ? '🔴' : '🟢'} ${tab.title}
-                            ${isAlert && !isMuted ? '<span class="alert-badge">هشدار!</span>' : ''}
-                            ${isMuted ? '<span style="color:#888;font-size:11px">(بی‌صدا)</span>' : ''}
+                            <span class="type-badge ${typeClass}">${typeName}</span>
+                            ${alert ? '🔴' : '🟢'} ${t.title}
+                            ${muted ? '<span style="color:#888">(بی‌صدا)</span>' : ''}
                         </div>
-                        <div class="tab-details">آخرین بررسی: ${timeAgo(tab.lastCheck)}</div>
-                        <div class="tab-details">سطرها: ${tab.recentRows || 0} (۵ دقیقه اخیر)</div>
-                        ${tab.lastValue !== null ? `
-                            <div class="tab-numbers">
-                                آخرین مقدار: <strong>${tab.lastValue}</strong>
-                                ${tab.lastTime ? `(${tab.lastTime})` : ''}
-                            </div>
-                        ` : ''}
-                        ${tab.average !== null ? `
-                            <div class="tab-numbers">
-                                میانگین: <strong>${tab.average.toFixed(2)}</strong>
-                                (${tab.averageCount} مقدار)
-                            </div>
-                        ` : ''}
-                        ${tab.pageAlertWords && tab.pageAlertWords.length > 0 ? `
-                            <div class="tab-alert-info">
-                                ⚠️ صفحه: ${tab.pageAlertWords.join(', ')}
-                            </div>
-                        ` : ''}
-                        ${tab.alertWord ? `
-                            <div class="tab-alert-info">
-                                ⚠️ جدول: ${tab.alertWord}
-                            </div>
-                        ` : ''}
-                        ${tab.zeroValue ? `
-                            <div class="tab-alert-info">
-                                ⚠️ مقدار صفر!
-                            </div>
-                        ` : ''}
-                        ${tab.suddenChange ? `
-                            <div class="tab-alert-info">
-                                ⚠️ ${tab.suddenChange.direction} ${tab.suddenChange.change.toFixed(1)}%
-                                (${tab.suddenChange.average.toFixed(1)} → ${tab.suddenChange.current})
-                            </div>
-                        ` : ''}
+                        <div class="tab-details">آخرین: ${timeAgo(t.lastCheck)}</div>
+                        ${details}
                     </div>
                     <div class="mute-toggle">
-                        <button class="mute-btn ${isMuted ? 'muted' : 'active'}" 
-                                data-tab-id="${tabId}"
-                                title="${isMuted ? 'فعال کردن صدا' : 'بی‌صدا کردن'}">
-                        </button>
-                        <span class="mute-label ${isMuted ? 'muted' : 'active'}">
-                            ${isMuted ? '🔇 بی‌صدا' : '🔊 فعال'}
-                        </span>
+                        <button class="mute-btn ${muted ? 'muted' : 'active'}" data-id="${id}"></button>
+                        <span class="mute-label ${muted ? 'muted' : 'active'}">${muted ? '🔇' : '🔊'}</span>
                     </div>
                 </div>
-            `}).join('');
-            
-            // اضافه کردن event listener برای دکمه‌های mute
-            document.querySelectorAll('.mute-btn').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    const tabId = e.target.dataset.tabId;
-                    await chrome.runtime.sendMessage({ 
-                        action: 'toggleMute', 
-                        tabId: parseInt(tabId) 
-                    });
-                    updateDashboard();
-                });
-            });
-        }
+            `;
+        }).join('');
         
-        // === آلارم‌ها ===
-        const alertsList = document.getElementById('alertsList');
-        const alerts = status.alerts || [];
-        
-        if (alerts.length === 0) {
-            alertsList.innerHTML = '<div class="no-data success">✅ بدون آلارم</div>';
-        } else {
-            alertsList.innerHTML = alerts.slice(0, 20).map(alert => `
-                <div class="alert-item">
-                    <div class="alert-title">🚨 ${alert.tabTitle}</div>
-                    <div class="alert-detail">${alert.detail}</div>
-                    <div class="alert-time">${formatTime(alert.time)}</div>
-                </div>
-            `).join('');
-        }
-        
-    } catch (error) {
-        console.log('Error:', error);
+        document.querySelectorAll('.mute-btn').forEach(btn => {
+            btn.onclick = async () => {
+                await chrome.runtime.sendMessage({ action: 'toggleMute', tabId: parseInt(btn.dataset.id) });
+                update();
+            };
+        });
+    }
+    
+    // آلارم‌ها
+    const alerts = s.alerts || [];
+    const alertsList = document.getElementById('alertsList');
+    
+    if (alerts.length === 0) {
+        alertsList.innerHTML = '<div class="no-data ok">✅ بدون آلارم</div>';
+    } else {
+        alertsList.innerHTML = alerts.slice(0, 20).map(a => `
+            <div class="alert-item">
+                <div class="alert-title">🚨 ${a.tabTitle}</div>
+                <div class="alert-detail">${a.detail}</div>
+                <div class="alert-time">${formatTime(a.time)}</div>
+            </div>
+        `).join('');
     }
 }
 
-// === دکمه Toggle ===
-document.getElementById('toggleBtn').addEventListener('click', async () => {
+document.getElementById('toggleBtn').onclick = async () => {
     await chrome.runtime.sendMessage({ action: 'toggle' });
-    updateDashboard();
-});
+    update();
+};
 
-// === دکمه ریست ===
-document.getElementById('resetBtn').addEventListener('click', async () => {
-    if (confirm('آیا مطمئن هستید؟\nتمام تب‌ها و لاگ‌ها پاک می‌شوند و برنامه از اول شروع می‌کند.')) {
+document.getElementById('resetBtn').onclick = async () => {
+    if (confirm('ریست شود؟')) {
         await chrome.runtime.sendMessage({ action: 'reset' });
-        updateDashboard();
+        update();
     }
-});
+};
 
-// === دکمه پاک کردن آلارم‌ها ===
-document.getElementById('clearBtn').addEventListener('click', async () => {
+document.getElementById('clearBtn').onclick = async () => {
     await chrome.runtime.sendMessage({ action: 'clearAlerts' });
-    updateDashboard();
-});
+    update();
+};
 
-// === شروع ===
-updateDashboard();
-setInterval(updateDashboard, 2000);
+update();
+setInterval(update, 2000);
