@@ -64,126 +64,129 @@ async function playAlarm() {
     } catch (e) {}
 }
 
-// === خواندن Grafana ===
-function readGrafana() {
-    const result = { type: 'grafana', rows: [], pageAlerts: [], error: null };
+// === تشخیص نوع صفحه و خواندن (همه توابع داخل این تابع هستند) ===
+function detectAndRead() {
     
-    try {
-        // جستجوی کل صفحه
-        const safeWords = ['download', 'dropdown', 'markdown', 'breakdown'];
-        const alertPatterns = [
-            /\bDOWN\b/gi, /\bDisconnect\b/gi, /\bDisconnected\b/gi,
-            /\bError\b/gi, /\bCritical\b/gi, /\bFailed\b/gi,
-            /\bFailure\b/gi, /\bUnreachable\b/gi, /\bOffline\b/gi, /\bTimeout\b/gi
-        ];
+    // ========== تابع خواندن Grafana ==========
+    function readGrafana() {
+        const result = { type: 'grafana', rows: [], pageAlerts: [], error: null };
         
-        let pageText = document.body.innerText || '';
-        for (let word of safeWords) {
-            pageText = pageText.replace(new RegExp(word, 'gi'), '___');
-        }
-        
-        for (let pattern of alertPatterns) {
-            const matches = pageText.match(pattern);
-            if (matches) {
-                matches.forEach(m => {
-                    if (!result.pageAlerts.includes(m.toUpperCase())) {
-                        result.pageAlerts.push(m.toUpperCase());
-                    }
-                });
+        try {
+            // جستجوی کل صفحه
+            const safeWords = ['download', 'dropdown', 'markdown', 'breakdown'];
+            const alertPatterns = [
+                /\bDOWN\b/gi, /\bDisconnect\b/gi, /\bDisconnected\b/gi,
+                /\bError\b/gi, /\bCritical\b/gi, /\bFailed\b/gi,
+                /\bFailure\b/gi, /\bUnreachable\b/gi, /\bOffline\b/gi, /\bTimeout\b/gi
+            ];
+            
+            let pageText = document.body.innerText || '';
+            for (let word of safeWords) {
+                pageText = pageText.replace(new RegExp(word, 'gi'), '___');
             }
-        }
-        
-        // خواندن جدول
-        const rows = document.querySelectorAll('[role="row"]');
-        for (let row of rows) {
-            const cells = row.querySelectorAll('[role="cell"]');
-            if (cells.length >= 2) {
-                const timeText = cells[0].innerText.trim();
-                const valueText = cells[1].innerText.trim();
-                const timeMatch = timeText.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/);
-                
-                if (timeMatch) {
-                    const timestamp = new Date(timeMatch[1] + 'T' + timeMatch[2]).getTime();
-                    const numValue = parseFloat(valueText);
-                    result.rows.push({
-                        timestamp, timeText,
-                        value: isNaN(numValue) ? valueText : numValue,
-                        isNumeric: !isNaN(numValue)
+            
+            for (let pattern of alertPatterns) {
+                const matches = pageText.match(pattern);
+                if (matches) {
+                    matches.forEach(m => {
+                        if (!result.pageAlerts.includes(m.toUpperCase())) {
+                            result.pageAlerts.push(m.toUpperCase());
+                        }
                     });
                 }
             }
+            
+            // خواندن جدول
+            const rows = document.querySelectorAll('[role="row"]');
+            for (let row of rows) {
+                const cells = row.querySelectorAll('[role="cell"]');
+                if (cells.length >= 2) {
+                    const timeText = cells[0].innerText.trim();
+                    const valueText = cells[1].innerText.trim();
+                    const timeMatch = timeText.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/);
+                    
+                    if (timeMatch) {
+                        const timestamp = new Date(timeMatch[1] + 'T' + timeMatch[2]).getTime();
+                        const numValue = parseFloat(valueText);
+                        result.rows.push({
+                            timestamp, timeText,
+                            value: isNaN(numValue) ? valueText : numValue,
+                            isNumeric: !isNaN(numValue)
+                        });
+                    }
+                }
+            }
+            result.rows.sort((a, b) => a.timestamp - b.timestamp);
+        } catch (e) {
+            result.error = e.message;
         }
-        result.rows.sort((a, b) => a.timestamp - b.timestamp);
-    } catch (e) {
-        result.error = e.message;
+        
+        return result;
     }
     
-    return result;
-}
-
-// === خواندن Zabbix ===
-function readZabbix() {
-    const result = { type: 'zabbix', problems: [], error: null };
-    
-    try {
-        const tables = document.querySelectorAll('table');
-        const seen = new Set();
+    // ========== تابع خواندن Zabbix ==========
+    function readZabbix() {
+        const result = { type: 'zabbix', problems: [], error: null };
         
-        tables.forEach((table) => {
-            const rows = table.querySelectorAll('tbody tr');
+        try {
+            const tables = document.querySelectorAll('table');
+            const seen = new Set();
             
-            rows.forEach((row) => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 7) return;
+            tables.forEach((table) => {
+                const rows = table.querySelectorAll('tbody tr');
                 
-                const rowText = row.innerText.toLowerCase();
-                if (rowText.includes('resolved')) return;
-                
-                const time = cells[0]?.innerText?.trim() || '';
-                const host = cells[4]?.innerText?.trim() || '';
-                const problem = cells[5]?.innerText?.trim() || '';
-                const duration = cells[6]?.innerText?.trim() || '';
-                
-                if (!duration || !problem) return;
-                
-                const key = `${host}-${problem}`;
-                if (seen.has(key)) return;
-                seen.add(key);
-                
-                // تبدیل به دقیقه
-                let minutes = 0;
-                const h = duration.match(/(\d+)h/);
-                const m = duration.match(/(\d+)m/);
-                const s = duration.match(/(\d+)s/);
-                if (h) minutes += parseInt(h[1]) * 60;
-                if (m) minutes += parseInt(m[1]);
-                if (s) minutes += parseInt(s[1]) / 60;
-                
-                result.problems.push({
-                    time, host, problem, duration, minutes,
-                    shouldAlert: minutes >= 5 && minutes <= 10
+                rows.forEach((row) => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length < 7) return;
+                    
+                    const rowText = row.innerText.toLowerCase();
+                    if (rowText.includes('resolved')) return;
+                    
+                    const time = cells[0]?.innerText?.trim() || '';
+                    const host = cells[4]?.innerText?.trim() || '';
+                    const problem = cells[5]?.innerText?.trim() || '';
+                    const duration = cells[6]?.innerText?.trim() || '';
+                    
+                    if (!duration || !problem) return;
+                    
+                    const key = `${host}-${problem}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    
+                    // تبدیل به دقیقه
+                    let minutes = 0;
+                    const h = duration.match(/(\d+)h/);
+                    const m = duration.match(/(\d+)m/);
+                    const s = duration.match(/(\d+)s/);
+                    if (h) minutes += parseInt(h[1]) * 60;
+                    if (m) minutes += parseInt(m[1]);
+                    if (s) minutes += parseInt(s[1]) / 60;
+                    
+                    result.problems.push({
+                        time, host, problem, duration, minutes,
+                        shouldAlert: minutes >= 5 && minutes <= 10
+                    });
                 });
             });
-        });
-    } catch (e) {
-        result.error = e.message;
+        } catch (e) {
+            result.error = e.message;
+        }
+        
+        return result;
     }
     
-    return result;
-}
-
-// === تشخیص نوع صفحه و خواندن ===
-function detectAndRead() {
+    // ========== منطق اصلی تشخیص ==========
     const url = window.location.href.toLowerCase();
     const html = document.body.innerHTML.toLowerCase();
     
+    // اول بر اساس URL تشخیص بده
     if (url.includes('zabbix') || html.includes('zabbix')) {
         return readZabbix();
     } else if (url.includes('grafana') || html.includes('grafana')) {
         return readGrafana();
     }
     
-    // تلاش برای هر دو
+    // اگر مشخص نبود، هر دو رو امتحان کن
     const zabbix = readZabbix();
     if (zabbix.problems.length > 0) return zabbix;
     
@@ -386,4 +389,4 @@ console.log('🚀 Monitoring Alert v2.0');
 loadStatus().then(() => {
     setupOffscreen();
     checkAllTabs();
-});        
+});
