@@ -1,0 +1,42 @@
+// === 🔍 ELK Inspector ===
+(function() {
+    console.log('='.repeat(50));
+    console.log('🔍 ELK Inspector');
+    console.log('='.repeat(50));
+    
+    // پیدا کردن همه جداول
+    const tables = document.querySelectorAll('table');
+    console.log(`\n📊 تعداد جداول: ${tables.length}`);
+    
+    tables.forEach((table, i) => {
+        console.log(`\n--- جدول ${i + 1} ---`);
+        const rows = table.querySelectorAll('tr');
+        
+        // فقط ۳ سطر اول
+        rows.forEach((row, j) => {
+            if (j < 3) {
+                const cells = row.querySelectorAll('td, th');
+                const data = Array.from(cells).map(c => c.innerText.trim().substring(0, 30));
+                console.log(`سطر ${j}:`, data);
+            }
+        });
+    });
+    
+    // جستجوی timestamp
+    console.log('\n⏰ جستجوی Timestamp:');
+    const text = document.body.innerText;
+    const timeMatch = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s*,\s*\d{4}\s*@\s*\d{2}:\d{2}:\d{2}/g);
+    if (timeMatch) {
+        console.log('پیدا شد:', timeMatch.slice(0, 3));
+    }
+    
+    // جستجوی free0000
+    console.log('\n🔍 جستجوی Return Code:');
+    const freeMatch = text.match(/free\d+/gi);
+    if (freeMatch) {
+        console.log('Free codes:', [...new Set(freeMatch)]);
+    }
+    
+    console.log('\n' + '='.repeat(50));
+    console.log('✅ خروجی رو کپی کن!');
+})();
