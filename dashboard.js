@@ -80,8 +80,16 @@ async function update() {
         tabsList.innerHTML = tabs.map(([id, t]) => {
             const muted = s.mutedTabs && s.mutedTabs[id];
             const alert = t.status === 'ALERT';
-            const typeClass = t.type === 'zabbix' ? 'type-zabbix' : 'type-grafana';
-            const typeName = t.type === 'zabbix' ? 'Zabbix' : 'Grafana';
+            let typeClass = 'type-grafana';
+            let typeName = 'Grafana';
+            
+            if (t.type === 'zabbix') {
+                typeClass = 'type-zabbix';
+                typeName = 'Zabbix';
+            } else if (t.type === 'kibana') {
+                typeClass = 'type-kibana';
+                typeName = 'Kibana';
+            }
             
             let details = '';
             
@@ -120,6 +128,32 @@ async function update() {
                 if (t.suddenChange) {
                     details += `<div class="tab-alert-info">⚠️ ${t.suddenChange.direction} ${t.suddenChange.change.toFixed(1)}% (میانگین: ${t.suddenChange.average.toFixed(1)} → فعلی: ${t.suddenChange.current})</div>`;
                 }
+            }
+            
+            // === نمایش Kibana ===
+            if (t.type === 'kibana' && t.kibanaStats) {
+                const k = t.kibanaStats;
+                const barColor = k.rate > 5 ? '#ff4444' : '#00ff88';
+                
+                details = `
+                    <div class="tab-details">
+                        📊 کل: <strong>${k.total.toLocaleString()}</strong> | 
+                        ✅ سالم: <strong>${k.good.toLocaleString()}</strong> | 
+                        ❌ خطا: <strong>${k.error.toLocaleString()}</strong>
+                    </div>
+                    <div style="margin-top:8px; background:#333; height:6px; border-radius:3px; overflow:hidden;">
+                        <div style="width:${Math.min(k.rate, 100)}%; background:${barColor}; height:100%;"></div>
+                    </div>
+                    <div class="tab-numbers" style="color:${barColor}; margin-top:4px;">
+                        📈 نرخ خطا: <strong>${k.rate.toFixed(2)}%</strong>
+                        ${k.rate > 5 ? ' 🚨' : ' ✅'}
+                    </div>
+                    ${k.lastTimestamp ? `
+                        <div class="tab-details" style="margin-top:5px;">
+                            ⏰ آخرین لاگ: <strong>${k.lastTimestamp}</strong>
+                        </div>
+                    ` : ''}
+                `;
             }
             
             return `
