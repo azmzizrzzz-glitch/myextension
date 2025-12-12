@@ -7,6 +7,40 @@ const timeAgo = (t) => {
     return `${Math.floor(s / 3600)} ساعت پیش`;
 };
 
+// === Tab Revolver UI ===
+async function updateRevolverUI() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'getRevolverStatus' });
+        const box = document.getElementById('revolverBox');
+        const status = document.getElementById('revolverStatus');
+        const btn = document.getElementById('revolverBtn');
+        const info = document.getElementById('revolverInfo');
+        const input = document.getElementById('revolverInterval');
+        
+        if (response.enabled) {
+            box.classList.add('active');
+            status.textContent = '✅ فعال';
+            status.className = 'revolver-status on';
+            btn.textContent = '⏹️ توقف';
+            btn.className = 'btn-revolver stop';
+            info.innerHTML = '<span class="rotating">🔄</span> در حال چرخش بین تب‌ها... سیستم بیدار است';
+            info.className = 'revolver-info active';
+        } else {
+            box.classList.remove('active');
+            status.textContent = 'غیرفعال';
+            status.className = 'revolver-status off';
+            btn.textContent = '▶️ شروع';
+            btn.className = 'btn-revolver start';
+            info.innerHTML = '💡 بین تب‌های مانیتورینگ چرخش می‌کند و سیستم را بیدار نگه می‌دارد';
+            info.className = 'revolver-info';
+        }
+        
+        input.value = response.interval;
+    } catch (e) {
+        console.log('Revolver UI error:', e);
+    }
+}
+
 async function update() {
     const data = await chrome.storage.local.get('extensionStatus');
     const s = data.extensionStatus;
@@ -32,6 +66,9 @@ async function update() {
     document.getElementById('startTime').textContent = formatTime(s.startTime);
     document.getElementById('lastCheck').textContent = timeAgo(s.lastCheck);
     document.getElementById('totalChecks').textContent = s.totalChecks;
+    
+    // آپدیت Revolver UI
+    updateRevolverUI();
     
     // تب‌ها
     const tabs = Object.entries(s.tabs || {});
@@ -62,30 +99,24 @@ async function update() {
             
             // === نمایش Grafana ===
             if (t.type === 'grafana') {
-                // سطرهای اخیر
                 details = `<div class="tab-details">سطرها: ${t.recentRows || 0} (۵ دقیقه اخیر)</div>`;
                 
-                // آخرین مقدار
                 if (t.lastValue !== null && t.lastValue !== undefined) {
                     details += `<div class="tab-numbers">آخرین مقدار: <strong>${t.lastValue}</strong> ${t.lastTime ? `(${t.lastTime})` : ''}</div>`;
                 }
                 
-                // میانگین ۲۰ مورد - با رنگ آبی
                 if (t.average !== null && t.average !== undefined) {
                     details += `<div class="tab-average">📊 میانگین: <strong>${t.average.toFixed(2)}</strong> (${t.averageCount} مقدار)</div>`;
                 }
                 
-                // کلمات خطرناک در صفحه
                 if (t.pageAlertWords && t.pageAlertWords.length > 0) {
                     details += `<div class="tab-alert-info">⚠️ صفحه: ${t.pageAlertWords.join(', ')}</div>`;
                 }
                 
-                // مقدار صفر
                 if (t.zeroValue) {
                     details += `<div class="tab-alert-info">⚠️ مقدار صفر!</div>`;
                 }
                 
-                // کاهش ناگهانی
                 if (t.suddenChange) {
                     details += `<div class="tab-alert-info">⚠️ ${t.suddenChange.direction} ${t.suddenChange.change.toFixed(1)}% (میانگین: ${t.suddenChange.average.toFixed(1)} → فعلی: ${t.suddenChange.current})</div>`;
                 }
@@ -136,13 +167,15 @@ async function update() {
     }
 }
 
+// === Event Listeners ===
+
 document.getElementById('toggleBtn').onclick = async () => {
     await chrome.runtime.sendMessage({ action: 'toggle' });
     update();
 };
 
 document.getElementById('resetBtn').onclick = async () => {
-    if (confirm('ریست شود؟')) {
+    if (confirm('ریست شود؟ Tab Revolver هم متوقف می‌شود.')) {
         await chrome.runtime.sendMessage({ action: 'reset' });
         update();
     }
@@ -153,5 +186,19 @@ document.getElementById('clearBtn').onclick = async () => {
     update();
 };
 
+// === Revolver Controls ===
+
+document.getElementById('revolverBtn').onclick = async () => {
+    await chrome.runtime.sendMessage({ action: 'toggleRevolver' });
+    updateRevolverUI();
+};
+
+document.getElementById('revolverInterval').onchange = async (e) => {
+    const interval = parseInt(e.target.value) || 3000;
+    await chrome.runtime.sendMessage({ action: 'setRevolverInterval', interval });
+    updateRevolverUI();
+};
+
+// === Start ===
 update();
 setInterval(update, 2000);
