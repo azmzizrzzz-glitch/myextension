@@ -7,6 +7,13 @@ const ZABBIX_MIN_MINUTES = 5;
 const ZABBIX_MAX_MINUTES = 10;
 let isRunning = true;
 
+// === Tab Revolver ===
+let revolverEnabled = false;
+let revolverInterval = 3000;
+let revolverTimer = null;
+let currentTabIndex = 0;
+let monitoredTabIds = [];
+
 // === کلمات خطرناک ===
 const ALERT_PATTERNS = [
     /\bDOWN\b/i, /\bDisconnect\b/i, /\bDisconnected\b/i,
@@ -23,7 +30,11 @@ let extensionStatus = {
     totalChecks: 0,
     tabs: {},
     alerts: [],
-    mutedTabs: {}
+    mutedTabs: {},
+    revolver: {
+        enabled: false,
+        interval: 3000
+    }
 };
 
 // === بارگذاری وضعیت ===
@@ -33,13 +44,120 @@ async function loadStatus() {
         if (data.extensionStatus) {
             extensionStatus = { ...extensionStatus, ...data.extensionStatus };
             isRunning = extensionStatus.isRunning;
+            
+            // بارگذاری تنظیمات Revolver
+            if (extensionStatus.revolver) {
+                revolverEnabled = extensionStatus.revolver.enabled;
+                revolverInterval = extensionStatus.revolver.interval || 3000;
+            }
         }
     } catch (e) {}
 }
 
 // === ذخیره وضعیت ===
 async function saveStatus() {
+    extensionStatus.revolver = {
+        enabled: revolverEnabled,
+        interval: revolverInterval
+    };
     await chrome.storage.local.set({ extensionStatus });
+}
+
+// === جلوگیری از خواب سیستم ===
+function keepSystemAwake(enable) {
+    try {
+        if (enable) {
+            chrome.power.requestKeepAwake("display");
+            console.log('🔆 سیستم بیدار نگه داشته شد');
+        } else {
+            chrome.power.releaseKeepAwake();
+            console.log('😴 اجازه خواب به سیستم داده شد');
+        }
+    } catch (e) {
+        console.log('Power API error:', e);
+    }
+}
+
+// === Tab Revolver ===
+async function getMonitoredTabs() {
+    try {
+        const tabs = await chrome.tabs.query({});
+        // فقط تب‌هایی که مانیتور میشن (Grafana یا Zabbix)
+        const monitored = tabs.filter(tab => {
+            if (!tab.url) return false;
+            if (tab.url.startsWith('chrome://')) return false;
+            if (tab.url.startsWith('chrome-extension://')) return false;
+            const url = tab.url.toLowerCase();
+            return url.includes('grafana') || url.includes('zabbix') || 
+                   extensionStatus.tabs[tab.id];
+        });
+        return monitored;
+    } catch (e) {
+        return [];
+    }
+}
+
+async function rotateToNextTab() {
+    if (!revolverEnabled || !isRunning) return;
+    
+    try {
+        const tabs = await getMonitoredTabs();
+        if (tabs.length === 0) return;
+        
+        currentTabIndex = (currentTabIndex + 1) % tabs.length;
+        const nextTab = tabs[currentTabIndex];
+        
+        if (nextTab && nextTab.id) {
+            await chrome.tabs.update(nextTab.id, { active: true });
+            
+            // فوکوس روی پنجره
+            if (nextTab.windowId) {
+                await chrome.windows.update(nextTab.windowId, { focused: true });
+            }
+        }
+    } catch (e) {
+        console.log('Rotate error:', e);
+    }
+}
+
+function startRevolver() {
+    stopRevolver();
+    revolverEnabled = true;
+    
+    // جلوگیری از خواب سیستم
+    keepSystemAwake(true);
+    
+    // شروع چرخش
+    revolverTimer = setInterval(rotateToNextTab, revolverInterval);
+    console.log(`🔄 Tab Revolver شروع شد (${revolverInterval}ms)`);
+    
+    saveStatus();
+}
+
+function stopRevolver() {
+    revolverEnabled = false;
+    
+    if (revolverTimer) {
+        clearInterval(revolverTimer);
+        revolverTimer = null;
+    }
+    
+    // اجازه خواب به سیستم
+    keepSystemAwake(false);
+    
+    console.log('⏹️ Tab Revolver متوقف شد');
+    saveStatus();
+}
+
+function setRevolverInterval(ms) {
+    revolverInterval = Math.max(1000, Math.min(60000, ms)); // حداقل 1 ثانیه، حداکثر 60 ثانیه
+    
+    // اگه در حال اجراست، ریستارت کن
+    if (revolverEnabled) {
+        startRevolver();
+    } else {
+        saveStatus();
+    }
 }
 
 // === پخش صدا ===
@@ -65,15 +183,13 @@ async function playAlarm() {
     } catch (e) {}
 }
 
-// === تشخیص نوع صفحه و خواندن (همه توابع داخل این تابع هستند) ===
+// === تشخیص نوع صفحه و خواندن ===
 function detectAndRead() {
     
-    // ========== تابع خواندن Grafana ==========
     function readGrafana() {
         const result = { type: 'grafana', rows: [], pageAlerts: [], error: null };
         
         try {
-            // جستجوی کل صفحه
             const safeWords = ['download', 'dropdown', 'markdown', 'breakdown'];
             const alertPatterns = [
                 /\bDOWN\b/gi, /\bDisconnect\b/gi, /\bDisconnected\b/gi,
@@ -97,7 +213,6 @@ function detectAndRead() {
                 }
             }
             
-            // خواندن جدول
             const rows = document.querySelectorAll('[role="row"]');
             for (let row of rows) {
                 const cells = row.querySelectorAll('[role="cell"]');
@@ -125,7 +240,6 @@ function detectAndRead() {
         return result;
     }
     
-    // ========== تابع خواندن Zabbix ==========
     function readZabbix() {
         const result = { type: 'zabbix', problems: [], error: null };
         
@@ -154,7 +268,6 @@ function detectAndRead() {
                     if (seen.has(key)) return;
                     seen.add(key);
                     
-                    // تبدیل به دقیقه
                     let minutes = 0;
                     const h = duration.match(/(\d+)h/);
                     const m = duration.match(/(\d+)m/);
@@ -176,18 +289,15 @@ function detectAndRead() {
         return result;
     }
     
-    // ========== منطق اصلی تشخیص ==========
     const url = window.location.href.toLowerCase();
     const html = document.body.innerHTML.toLowerCase();
     
-    // اول بر اساس URL تشخیص بده
     if (url.includes('zabbix') || html.includes('zabbix')) {
         return readZabbix();
     } else if (url.includes('grafana') || html.includes('grafana')) {
         return readGrafana();
     }
     
-    // اگر مشخص نبود، هر دو رو امتحان کن
     const zabbix = readZabbix();
     if (zabbix.problems.length > 0) return zabbix;
     
@@ -214,7 +324,6 @@ async function processResults(data, tab) {
         status: 'OK',
         isMuted,
         details: {},
-        // اطلاعات اضافی برای نمایش
         lastValue: null,
         lastTime: null,
         average: null,
@@ -257,7 +366,6 @@ async function processResults(data, tab) {
             pageAlerts: data.pageAlerts
         };
         
-        // کلمات خطرناک در صفحه
         if (data.pageAlerts.length > 0) {
             extensionStatus.tabs[tabId].pageAlertWords = data.pageAlerts;
             if (!isMuted) {
@@ -274,7 +382,6 @@ async function processResults(data, tab) {
             extensionStatus.tabs[tabId].details.lastValue = latest.value;
             extensionStatus.tabs[tabId].details.lastTime = latest.timeText;
             
-            // مقدار صفر
             if (latest.isNumeric && latest.value === 0) {
                 extensionStatus.tabs[tabId].zeroValue = true;
                 if (!isMuted) {
@@ -284,7 +391,6 @@ async function processResults(data, tab) {
                 }
             }
             
-            // محاسبه میانگین ۲۰ مقدار آخر
             if (latest.isNumeric && recentRows.length >= 3) {
                 const numericRows = recentRows.filter(r => r.isNumeric);
                 const last20 = numericRows.slice(-AVERAGE_COUNT);
@@ -297,7 +403,6 @@ async function processResults(data, tab) {
                     extensionStatus.tabs[tabId].details.average = avg;
                     extensionStatus.tabs[tabId].details.averageCount = prevNums.length;
                     
-                    // کاهش ۵۰٪ نسبت به میانگین
                     if (avg > 0) {
                         const changePercent = ((avg - latest.value) / avg) * 100;
                         
@@ -321,7 +426,6 @@ async function processResults(data, tab) {
         }
     }
     
-    // ثبت آلارم
     if (shouldAlarm) {
         extensionStatus.alerts.unshift({
             time: now,
@@ -374,6 +478,9 @@ async function checkAllTabs() {
 
 // === ریست ===
 function resetAll() {
+    // توقف Revolver
+    stopRevolver();
+    
     extensionStatus = {
         isRunning: true,
         startTime: Date.now(),
@@ -381,18 +488,47 @@ function resetAll() {
         totalChecks: 0,
         tabs: {},
         alerts: [],
-        mutedTabs: {}
+        mutedTabs: {},
+        revolver: {
+            enabled: false,
+            interval: 3000
+        }
     };
     isRunning = true;
+    revolverEnabled = false;
+    revolverInterval = 3000;
     saveStatus();
+}
+
+// === توقف کامل ===
+function stopAll() {
+    isRunning = false;
+    extensionStatus.isRunning = false;
+    
+    // توقف Revolver
+    stopRevolver();
+    
+    saveStatus();
+    console.log('⏹️ همه چیز متوقف شد');
+}
+
+// === شروع مجدد ===
+function startAll() {
+    isRunning = true;
+    extensionStatus.isRunning = true;
+    saveStatus();
+    checkAllTabs();
+    console.log('▶️ برنامه شروع شد');
 }
 
 // === پیام‌ها ===
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'toggle') {
-        isRunning = !isRunning;
-        extensionStatus.isRunning = isRunning;
-        saveStatus();
+        if (isRunning) {
+            stopAll();
+        } else {
+            startAll();
+        }
         sendResponse({ isRunning });
     } else if (msg.action === 'reset') {
         resetAll();
@@ -409,6 +545,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.tabs.create({ url: 'dashboard.html' });
         sendResponse({ success: true });
     }
+    // === دستورات Revolver ===
+    else if (msg.action === 'startRevolver') {
+        startRevolver();
+        sendResponse({ success: true, enabled: true });
+    } else if (msg.action === 'stopRevolver') {
+        stopRevolver();
+        sendResponse({ success: true, enabled: false });
+    } else if (msg.action === 'toggleRevolver') {
+        if (revolverEnabled) {
+            stopRevolver();
+        } else {
+            startRevolver();
+        }
+        sendResponse({ enabled: revolverEnabled });
+    } else if (msg.action === 'setRevolverInterval') {
+        setRevolverInterval(msg.interval);
+        sendResponse({ success: true, interval: revolverInterval });
+    } else if (msg.action === 'getRevolverStatus') {
+        sendResponse({ 
+            enabled: revolverEnabled, 
+            interval: revolverInterval 
+        });
+    }
     return true;
 });
 
@@ -422,8 +581,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
 
 // === شروع ===
-console.log('🚀 Monitoring Alert v2.0');
+console.log('🚀 Monitoring Alert v2.1 + Tab Revolver');
 loadStatus().then(() => {
     setupOffscreen();
     checkAllTabs();
+    
+    // اگه قبلاً Revolver فعال بود، دوباره شروع کن
+    if (revolverEnabled && isRunning) {
+        startRevolver();
+    }
 });
