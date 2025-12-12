@@ -5,6 +5,8 @@ const CHANGE_THRESHOLD = 50;
 const AVERAGE_COUNT = 20;
 const ZABBIX_MIN_MINUTES = 5;
 const ZABBIX_MAX_MINUTES = 10;
+const ERROR_RATE_THRESHOLD = 5;
+const DATA_FREEZE_TIMEOUT = 120000; // 2 دقیقه
 let isRunning = true;
 
 // === Tab Revolver ===
@@ -12,7 +14,6 @@ let revolverEnabled = false;
 let revolverInterval = 3000;
 let revolverTimer = null;
 let currentTabIndex = 0;
-let monitoredTabIds = [];
 
 // === کلمات خطرناک ===
 const ALERT_PATTERNS = [
@@ -45,7 +46,6 @@ async function loadStatus() {
             extensionStatus = { ...extensionStatus, ...data.extensionStatus };
             isRunning = extensionStatus.isRunning;
             
-            // بارگذاری تنظیمات Revolver
             if (extensionStatus.revolver) {
                 revolverEnabled = extensionStatus.revolver.enabled;
                 revolverInterval = extensionStatus.revolver.interval || 3000;
@@ -82,13 +82,13 @@ function keepSystemAwake(enable) {
 async function getMonitoredTabs() {
     try {
         const tabs = await chrome.tabs.query({});
-        // فقط تب‌هایی که مانیتور میشن (Grafana یا Zabbix)
         const monitored = tabs.filter(tab => {
             if (!tab.url) return false;
             if (tab.url.startsWith('chrome://')) return false;
             if (tab.url.startsWith('chrome-extension://')) return false;
             const url = tab.url.toLowerCase();
             return url.includes('grafana') || url.includes('zabbix') || 
+                   url.includes('kibana') || url.includes('elastic') ||
                    extensionStatus.tabs[tab.id];
         });
         return monitored;
@@ -110,7 +110,6 @@ async function rotateToNextTab() {
         if (nextTab && nextTab.id) {
             await chrome.tabs.update(nextTab.id, { active: true });
             
-            // فوکوس روی پنجره
             if (nextTab.windowId) {
                 await chrome.windows.update(nextTab.windowId, { focused: true });
             }
@@ -123,36 +122,25 @@ async function rotateToNextTab() {
 function startRevolver() {
     stopRevolver();
     revolverEnabled = true;
-    
-    // جلوگیری از خواب سیستم
     keepSystemAwake(true);
-    
-    // شروع چرخش
     revolverTimer = setInterval(rotateToNextTab, revolverInterval);
     console.log(`🔄 Tab Revolver شروع شد (${revolverInterval}ms)`);
-    
     saveStatus();
 }
 
 function stopRevolver() {
     revolverEnabled = false;
-    
     if (revolverTimer) {
         clearInterval(revolverTimer);
         revolverTimer = null;
     }
-    
-    // اجازه خواب به سیستم
     keepSystemAwake(false);
-    
     console.log('⏹️ Tab Revolver متوقف شد');
     saveStatus();
 }
 
 function setRevolverInterval(ms) {
-    revolverInterval = Math.max(1000, Math.min(60000, ms)); // حداقل 1 ثانیه، حداکثر 60 ثانیه
-    
-    // اگه در حال اجراست، ریستارت کن
+    revolverInterval = Math.max(1000, Math.min(60000, ms));
     if (revolverEnabled) {
         startRevolver();
     } else {
@@ -186,6 +174,7 @@ async function playAlarm() {
 // === تشخیص نوع صفحه و خواندن ===
 function detectAndRead() {
     
+    // ========== تابع خواندن Grafana ==========
     function readGrafana() {
         const result = { type: 'grafana', rows: [], pageAlerts: [], error: null };
         
@@ -240,6 +229,7 @@ function detectAndRead() {
         return result;
     }
     
+    // ========== تابع خواندن Zabbix ==========
     function readZabbix() {
         const result = { type: 'zabbix', problems: [], error: null };
         
@@ -289,17 +279,106 @@ function detectAndRead() {
         return result;
     }
     
+    // ========== تابع خواندن Kibana/ELK ==========
+    function readKibana() {
+        const result = { 
+            type: 'kibana', 
+            totalCount: 0, 
+            goodCount: 0, 
+            errorCount: 0,
+            errorRate: 0,
+            lastTimestamp: null,
+            lastTimestampMs: null,
+            error: null 
+        };
+        
+        try {
+            // ۱. خواندن جدول Return Codes
+            const tables = document.querySelectorAll('table');
+            
+            tables.forEach(table => {
+                const rows = table.querySelectorAll('tr');
+                
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 2) {
+                        const text0 = cells[0].innerText.trim().replace(/\n/g, '');
+                        const text1 = cells[1].innerText.trim().replace(/\n/g, '');
+                        
+                        // پیدا کردن عدد (Count)
+                        const num = parseFloat(text1.replace(/,/g, ''));
+                        
+                        if (!isNaN(num) && num > 0) {
+                            result.totalCount += num;
+                            
+                            // Free0000 / SIAM0000 = درست، بقیه = خطا
+                            const code = text0.toLowerCase();
+                            if (code.includes('free0000') || code.includes('siam0000')) {
+                                result.goodCount += num;
+                            } else if (!code.includes('label') && !code.includes('keyword')) {
+                                result.errorCount += num;
+                            }
+                        }
+                    }
+                });
+            });
+            
+            // محاسبه درصد خطا
+            if (result.totalCount > 0) {
+                result.errorRate = (result.errorCount / result.totalCount) * 100;
+            }
+            
+            // ۲. خواندن آخرین Timestamp
+            const bodyText = document.body.innerText;
+            const timePattern = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+\s*,\s*\d{4}\s*@\s*\d{2}:\d{2}:\d{2}/g;
+            const matches = bodyText.match(timePattern);
+            
+            if (matches && matches.length > 0) {
+                // آخرین timestamp
+                const lastTime = matches[matches.length - 1];
+                result.lastTimestamp = lastTime;
+                
+                // تبدیل به Date
+                // "Dec 13, 2025 @ 00:52:09" -> Date object
+                const parsed = lastTime
+                    .replace('@', '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                result.lastTimestampMs = new Date(parsed).getTime();
+            }
+            
+        } catch (e) {
+            result.error = e.message;
+        }
+        
+        return result;
+    }
+    
+    // ========== منطق اصلی تشخیص ==========
     const url = window.location.href.toLowerCase();
     const html = document.body.innerHTML.toLowerCase();
     
+    // Kibana / ELK
+    if (url.includes('kibana') || url.includes('elastic') || url.includes('app/discover') || url.includes('app/dashboards')) {
+        return readKibana();
+    }
+    
+    // Zabbix
     if (url.includes('zabbix') || html.includes('zabbix')) {
         return readZabbix();
-    } else if (url.includes('grafana') || html.includes('grafana')) {
+    }
+    
+    // Grafana
+    if (url.includes('grafana') || html.includes('grafana')) {
         return readGrafana();
     }
     
+    // اگر مشخص نبود، هر دو رو امتحان کن
     const zabbix = readZabbix();
     if (zabbix.problems.length > 0) return zabbix;
+    
+    const kibana = readKibana();
+    if (kibana.totalCount > 0) return kibana;
     
     return readGrafana();
 }
@@ -332,7 +411,8 @@ async function processResults(data, tab) {
         suddenChange: null,
         zeroValue: false,
         pageAlertWords: [],
-        alertWord: null
+        alertWord: null,
+        kibanaStats: null
     };
     
     let shouldAlarm = false;
@@ -426,6 +506,45 @@ async function processResults(data, tab) {
         }
     }
     
+    // === پردازش Kibana/ELK ===
+    if (data.type === 'kibana') {
+        extensionStatus.tabs[tabId].kibanaStats = {
+            total: data.totalCount,
+            good: data.goodCount,
+            error: data.errorCount,
+            rate: data.errorRate,
+            lastTimestamp: data.lastTimestamp
+        };
+        
+        extensionStatus.tabs[tabId].details = {
+            totalCount: data.totalCount,
+            goodCount: data.goodCount,
+            errorCount: data.errorCount,
+            errorRate: data.errorRate,
+            lastTimestamp: data.lastTimestamp
+        };
+        
+        // ۱. چک درصد خطا (بیشتر از ۵٪)
+        if (data.errorRate > ERROR_RATE_THRESHOLD && !isMuted) {
+            extensionStatus.tabs[tabId].status = 'ALERT';
+            shouldAlarm = true;
+            alertReasons.push(`نرخ خطا: ${data.errorRate.toFixed(1)}% (مجاز: ${ERROR_RATE_THRESHOLD}%)`);
+        }
+        
+        // ۲. چک قطعی (آخرین لاگ بیش از ۲ دقیقه پیش)
+        if (data.lastTimestampMs) {
+            const timeDiff = now - data.lastTimestampMs;
+            
+            if (timeDiff > DATA_FREEZE_TIMEOUT && !isMuted) {
+                extensionStatus.tabs[tabId].status = 'ALERT';
+                shouldAlarm = true;
+                const minutes = Math.floor(timeDiff / 60000);
+                alertReasons.push(`⚠️ قطعی! آخرین لاگ: ${minutes} دقیقه پیش`);
+            }
+        }
+    }
+    
+    // ثبت آلارم
     if (shouldAlarm) {
         extensionStatus.alerts.unshift({
             time: now,
@@ -478,7 +597,6 @@ async function checkAllTabs() {
 
 // === ریست ===
 function resetAll() {
-    // توقف Revolver
     stopRevolver();
     
     extensionStatus = {
@@ -504,10 +622,7 @@ function resetAll() {
 function stopAll() {
     isRunning = false;
     extensionStatus.isRunning = false;
-    
-    // توقف Revolver
     stopRevolver();
-    
     saveStatus();
     console.log('⏹️ همه چیز متوقف شد');
 }
@@ -581,12 +696,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
 
 // === شروع ===
-console.log('🚀 Monitoring Alert v2.1 + Tab Revolver');
+console.log('🚀 Monitoring Alert v2.2 + ELK Support');
 loadStatus().then(() => {
     setupOffscreen();
     checkAllTabs();
     
-    // اگه قبلاً Revolver فعال بود، دوباره شروع کن
     if (revolverEnabled && isRunning) {
         startRevolver();
     }
