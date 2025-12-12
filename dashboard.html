@@ -166,6 +166,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            flex-wrap: wrap;
         }
         
         .tab-details {
@@ -174,10 +175,59 @@
             margin-bottom: 3px;
         }
         
+        /* === میانگین با رنگ آبی === */
+        .tab-average {
+            font-size: 12px;
+            color: #4dabf7;
+            margin-top: 5px;
+            background: rgba(77, 171, 247, 0.1);
+            padding: 5px 8px;
+            border-radius: 5px;
+            border-right: 3px solid #4dabf7;
+        }
+        
+        .tab-average strong {
+            color: #74c0fc;
+            font-size: 14px;
+        }
+        
         .tab-numbers {
             font-size: 11px;
             color: #4dabf7;
             margin-top: 5px;
+        }
+        
+        .tab-numbers strong {
+            color: #fff;
+        }
+        
+        /* === نوع سیستم === */
+        .type-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 5px;
+            font-weight: bold;
+        }
+        
+        .type-grafana {
+            background: #ff6b35;
+            color: #fff;
+        }
+        
+        .type-zabbix {
+            background: #d32f2f;
+            color: #fff;
+        }
+        
+        /* === هشدارها === */
+        .tab-alert {
+            font-size: 11px;
+            color: #ff4444;
+            margin-top: 3px;
+            padding: 3px 6px;
+            background: rgba(255, 68, 68, 0.1);
+            border-radius: 4px;
         }
         
         .tab-alert-info {
@@ -278,7 +328,7 @@
             color: #888;
         }
         
-        .no-data.success {
+        .no-data.success, .no-data.ok {
             color: #00ff88;
         }
         
