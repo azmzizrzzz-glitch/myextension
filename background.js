@@ -2,6 +2,7 @@
 const CHECK_INTERVAL = 3000;
 const HISTORY_MINUTES = 5;
 const CHANGE_THRESHOLD = 50;
+const AVERAGE_COUNT = 20;
 const ZABBIX_MIN_MINUTES = 5;
 const ZABBIX_MAX_MINUTES = 10;
 let isRunning = true;
@@ -212,7 +213,17 @@ async function processResults(data, tab) {
         lastCheck: now,
         status: 'OK',
         isMuted,
-        details: {}
+        details: {},
+        // اطلاعات اضافی برای نمایش
+        lastValue: null,
+        lastTime: null,
+        average: null,
+        averageCount: 0,
+        recentRows: 0,
+        suddenChange: null,
+        zeroValue: false,
+        pageAlertWords: [],
+        alertWord: null
     };
     
     let shouldAlarm = false;
@@ -239,6 +250,7 @@ async function processResults(data, tab) {
         const fiveMinutesAgo = now - (HISTORY_MINUTES * 60 * 1000);
         const recentRows = data.rows.filter(r => r.timestamp >= fiveMinutesAgo);
         
+        extensionStatus.tabs[tabId].recentRows = recentRows.length;
         extensionStatus.tabs[tabId].details = {
             totalRows: data.rows.length,
             recentRows: recentRows.length,
@@ -246,37 +258,62 @@ async function processResults(data, tab) {
         };
         
         // کلمات خطرناک در صفحه
-        if (data.pageAlerts.length > 0 && !isMuted) {
-            extensionStatus.tabs[tabId].status = 'ALERT';
-            shouldAlarm = true;
-            alertReasons.push(`صفحه: ${data.pageAlerts.join(', ')}`);
+        if (data.pageAlerts.length > 0) {
+            extensionStatus.tabs[tabId].pageAlertWords = data.pageAlerts;
+            if (!isMuted) {
+                extensionStatus.tabs[tabId].status = 'ALERT';
+                shouldAlarm = true;
+                alertReasons.push(`صفحه: ${data.pageAlerts.join(', ')}`);
+            }
         }
         
         if (recentRows.length > 0) {
             const latest = recentRows[recentRows.length - 1];
+            extensionStatus.tabs[tabId].lastValue = latest.value;
+            extensionStatus.tabs[tabId].lastTime = latest.timeText;
             extensionStatus.tabs[tabId].details.lastValue = latest.value;
             extensionStatus.tabs[tabId].details.lastTime = latest.timeText;
             
             // مقدار صفر
-            if (latest.isNumeric && latest.value === 0 && !isMuted) {
-                extensionStatus.tabs[tabId].status = 'ALERT';
-                shouldAlarm = true;
-                alertReasons.push('مقدار = ۰');
+            if (latest.isNumeric && latest.value === 0) {
+                extensionStatus.tabs[tabId].zeroValue = true;
+                if (!isMuted) {
+                    extensionStatus.tabs[tabId].status = 'ALERT';
+                    shouldAlarm = true;
+                    alertReasons.push('مقدار = ۰');
+                }
             }
             
-            // کاهش ۵۰٪
+            // محاسبه میانگین ۲۰ مقدار آخر
             if (latest.isNumeric && recentRows.length >= 3) {
-                const prevNums = recentRows.slice(0, -1).filter(r => r.isNumeric).map(r => r.value);
+                const numericRows = recentRows.filter(r => r.isNumeric);
+                const last20 = numericRows.slice(-AVERAGE_COUNT);
+                const prevNums = last20.slice(0, -1).map(r => r.value);
+                
                 if (prevNums.length >= 2) {
                     const avg = calculateAverage(prevNums);
+                    extensionStatus.tabs[tabId].average = avg;
+                    extensionStatus.tabs[tabId].averageCount = prevNums.length;
                     extensionStatus.tabs[tabId].details.average = avg;
+                    extensionStatus.tabs[tabId].details.averageCount = prevNums.length;
                     
+                    // کاهش ۵۰٪ نسبت به میانگین
                     if (avg > 0) {
-                        const change = ((avg - latest.value) / avg) * 100;
-                        if (change >= CHANGE_THRESHOLD && !isMuted) {
-                            extensionStatus.tabs[tabId].status = 'ALERT';
-                            shouldAlarm = true;
-                            alertReasons.push(`کاهش ${change.toFixed(1)}%`);
+                        const changePercent = ((avg - latest.value) / avg) * 100;
+                        
+                        if (changePercent >= CHANGE_THRESHOLD) {
+                            extensionStatus.tabs[tabId].suddenChange = {
+                                average: avg,
+                                current: latest.value,
+                                change: changePercent,
+                                direction: 'کاهش'
+                            };
+                            
+                            if (!isMuted) {
+                                extensionStatus.tabs[tabId].status = 'ALERT';
+                                shouldAlarm = true;
+                                alertReasons.push(`کاهش ${changePercent.toFixed(1)}% (میانگین: ${avg.toFixed(2)} ← فعلی: ${latest.value})`);
+                            }
                         }
                     }
                 }
