@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Monitoring Alert",
-  "version": "2.0",
-  "description": "آلارم برای Grafana و Zabbix",
+  "version": "2.1",
+  "description": "آلارم برای Grafana و Zabbix + Tab Revolver",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "alarms",
-    "offscreen"
+    "offscreen",
+    "power"
   ],
   "host_permissions": [
     "<all_urls>"
