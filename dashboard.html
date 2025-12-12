@@ -133,6 +133,129 @@
             transform: translateY(-2px);
         }
         
+        /* === Tab Revolver Box === */
+        .revolver-box {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border: 2px solid #333;
+        }
+        
+        .revolver-box.active {
+            border-color: #00ff88;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+        }
+        
+        .revolver-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .revolver-title {
+            font-size: 16px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .revolver-status {
+            font-size: 12px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        
+        .revolver-status.on {
+            background: #00ff88;
+            color: #000;
+        }
+        
+        .revolver-status.off {
+            background: #666;
+            color: #fff;
+        }
+        
+        .revolver-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .revolver-interval {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .revolver-interval label {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .revolver-interval input {
+            width: 80px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #0a0a1a;
+            color: #fff;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        .revolver-interval input:focus {
+            outline: none;
+            border-color: #4dabf7;
+        }
+        
+        .revolver-interval span {
+            font-size: 11px;
+            color: #666;
+        }
+        
+        .btn-revolver {
+            padding: 10px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            border: none;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        .btn-revolver.start {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+        }
+        
+        .btn-revolver.stop {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            color: #fff;
+        }
+        
+        .btn-revolver:hover {
+            transform: scale(1.05);
+        }
+        
+        .revolver-info {
+            margin-top: 10px;
+            font-size: 11px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .revolver-info.active {
+            color: #00ff88;
+        }
+        
         /* === تب‌ها === */
         .tab-item {
             background: #16213e;
@@ -347,6 +470,16 @@
             font-size: 10px;
             animation: pulse 1s infinite;
         }
+        
+        @keyframes rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .rotating {
+            animation: rotate 2s linear infinite;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -375,6 +508,27 @@
             <div class="card">
                 <div class="card-label">تعداد بررسی</div>
                 <div class="card-value number" id="totalChecks">0</div>
+            </div>
+        </div>
+        
+        <!-- Tab Revolver Section -->
+        <div class="revolver-box" id="revolverBox">
+            <div class="revolver-header">
+                <div class="revolver-title">
+                    🔄 Tab Revolver
+                </div>
+                <div class="revolver-status off" id="revolverStatus">غیرفعال</div>
+            </div>
+            <div class="revolver-controls">
+                <div class="revolver-interval">
+                    <label>زمان چرخش:</label>
+                    <input type="number" id="revolverInterval" value="3000" min="1000" max="60000" step="500">
+                    <span>میلی‌ثانیه</span>
+                </div>
+                <button class="btn-revolver start" id="revolverBtn">▶️ شروع</button>
+            </div>
+            <div class="revolver-info" id="revolverInfo">
+                💡 بین تب‌های مانیتورینگ چرخش می‌کند و سیستم را بیدار نگه می‌دارد
             </div>
         </div>
         
