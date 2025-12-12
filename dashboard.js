@@ -47,6 +47,8 @@ async function update() {
             const typeName = t.type === 'zabbix' ? 'Zabbix' : 'Grafana';
             
             let details = '';
+            
+            // === نمایش Zabbix ===
             if (t.type === 'zabbix' && t.details) {
                 details = `<div class="tab-details">Problems: ${t.details.totalProblems || 0} (هشدار: ${t.details.alertProblems || 0})</div>`;
                 if (t.details.problems) {
@@ -56,13 +58,36 @@ async function update() {
                         }
                     });
                 }
-            } else if (t.type === 'grafana' && t.details) {
-                details = `<div class="tab-details">سطرها: ${t.details.recentRows || 0}</div>`;
-                if (t.details.lastValue !== undefined) {
-                    details += `<div class="tab-details">آخرین: ${t.details.lastValue}</div>`;
+            }
+            
+            // === نمایش Grafana ===
+            if (t.type === 'grafana') {
+                // سطرهای اخیر
+                details = `<div class="tab-details">سطرها: ${t.recentRows || 0} (۵ دقیقه اخیر)</div>`;
+                
+                // آخرین مقدار
+                if (t.lastValue !== null && t.lastValue !== undefined) {
+                    details += `<div class="tab-numbers">آخرین مقدار: <strong>${t.lastValue}</strong> ${t.lastTime ? `(${t.lastTime})` : ''}</div>`;
                 }
-                if (t.details.pageAlerts && t.details.pageAlerts.length > 0) {
-                    details += `<div class="tab-alert">⚠️ ${t.details.pageAlerts.join(', ')}</div>`;
+                
+                // میانگین ۲۰ مورد - با رنگ آبی
+                if (t.average !== null && t.average !== undefined) {
+                    details += `<div class="tab-average">📊 میانگین: <strong>${t.average.toFixed(2)}</strong> (${t.averageCount} مقدار)</div>`;
+                }
+                
+                // کلمات خطرناک در صفحه
+                if (t.pageAlertWords && t.pageAlertWords.length > 0) {
+                    details += `<div class="tab-alert-info">⚠️ صفحه: ${t.pageAlertWords.join(', ')}</div>`;
+                }
+                
+                // مقدار صفر
+                if (t.zeroValue) {
+                    details += `<div class="tab-alert-info">⚠️ مقدار صفر!</div>`;
+                }
+                
+                // کاهش ناگهانی
+                if (t.suddenChange) {
+                    details += `<div class="tab-alert-info">⚠️ ${t.suddenChange.direction} ${t.suddenChange.change.toFixed(1)}% (میانگین: ${t.suddenChange.average.toFixed(1)} → فعلی: ${t.suddenChange.current})</div>`;
                 }
             }
             
@@ -72,14 +97,15 @@ async function update() {
                         <div class="tab-title">
                             <span class="type-badge ${typeClass}">${typeName}</span>
                             ${alert ? '🔴' : '🟢'} ${t.title}
-                            ${muted ? '<span style="color:#888">(بی‌صدا)</span>' : ''}
+                            ${alert && !muted ? '<span class="alert-badge">هشدار!</span>' : ''}
+                            ${muted ? '<span style="color:#888;font-size:11px">(بی‌صدا)</span>' : ''}
                         </div>
-                        <div class="tab-details">آخرین: ${timeAgo(t.lastCheck)}</div>
+                        <div class="tab-details">آخرین بررسی: ${timeAgo(t.lastCheck)}</div>
                         ${details}
                     </div>
                     <div class="mute-toggle">
                         <button class="mute-btn ${muted ? 'muted' : 'active'}" data-id="${id}"></button>
-                        <span class="mute-label ${muted ? 'muted' : 'active'}">${muted ? '🔇' : '🔊'}</span>
+                        <span class="mute-label ${muted ? 'muted' : 'active'}">${muted ? '🔇 بی‌صدا' : '🔊 فعال'}</span>
                     </div>
                 </div>
             `;
